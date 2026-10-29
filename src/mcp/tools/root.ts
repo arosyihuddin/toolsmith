@@ -10,7 +10,7 @@ export function registerRootTools(server: McpServer) {
     "sudo_exec",
     {
       description:
-        "Run one root command directly without a shell. An exact enabled Root Command Rule match bypasses approval; otherwise execution follows the OMP-MCP permission policy and any required approval. Shells and interpreters are blocked; arguments are passed literally, without shell parsing.",
+        "Run one root command directly without a shell. An exact enabled Root Command Rule match bypasses approval; otherwise execution follows the Toolsmith permission policy and any required approval. Shells and interpreters are blocked; arguments are passed literally, without shell parsing.",
       inputSchema: {
         command: z
           .string()

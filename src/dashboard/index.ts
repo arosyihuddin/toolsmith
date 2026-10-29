@@ -40,9 +40,9 @@ export async function handleDashboardRequest(request: Request): Promise<Response
 
   if (url.pathname === "/" || url.pathname === "/dashboard") {
     return Response.json({
-      service: "omp-mcp",
+      service: "toolsmith",
       message:
-        "The dashboard UI has moved to the standalone omp-control project.",
+        "The dashboard UI is provided by the standalone Toolsmith Console project.",
       apiBase: "/api",
     });
   }

@@ -1,94 +1,59 @@
-# OMP-MCP — Architecture
+# Toolsmith Architecture and Engineering Rules
 
-## Purpose
+This document defines implementation constraints for Toolsmith. Keep it aligned with the code. The server—not Toolsmith Console—is the security boundary.
 
-OMP-MCP exposes the Oh My Pi (OMP) agent runtime and native tools to MCP-compatible clients. It supports MCP transports and provides an authenticated HTTP control API used by OMP Control. The dashboard frontend is maintained separately in the OMP-Control repository.
+## Runtime boundaries
 
-## High-level structure
+- src/index.ts owns startup, MCP transport setup, HTTP routing, WebSocket upgrades, and ordered shutdown.
+- src/mcp/server.ts creates the MCP server; src/mcp/tools/ owns tool registration and handlers.
+- src/mcp/tools/register.ts is the enforcement point for exposure, permission policy, custom rules, approvals, and call logging. User-callable tools must not bypass it.
+- src/control-plane/ owns tool metadata, permission decisions, persistence, and Drizzle migrations.
+- src/dashboard/ owns the authenticated API consumed by Toolsmith Console; it does not serve the console frontend.
+- src/terminal/ owns interactive shell sessions and WebSocket I/O.
+- src/tunnels/ owns managed Cloudflare Quick Tunnel process records and lifecycle.
+- src/approval/ owns pending approval state and cancellation.
+- src/lib/config.ts is the canonical environment configuration surface.
 
-```text
-MCP client
-  └─ MCP transport (STDIO and/or Streamable HTTP)
-       └─ MCP server + tool registration
-            ├─ OMP agent/session tools (omp_*)
-            ├─ native OMP tools
-            └─ OMP-MCP built-ins
-                 ├─ filesystem/workspace
-                 ├─ terminal and computer control
-                 ├─ tool permissions and approvals
-                 └─ tunnel management
+## Tool implementation rules
 
-OMP Control
-  └─ authenticated HTTP control API (/api/*)
-       ├─ tool catalog, exposure, permissions, custom rules
-       ├─ logs, approvals, dashboard events (SSE)
-       ├─ workspace and terminal APIs
-       ├─ root-command configuration
-       └─ Cloudflare Tunnel process lifecycle
-```
+1. Register user-callable tools through registerExposedTool so policy and logging cannot be skipped accidentally.
+2. Mark annotations accurately. Read-only annotations do not replace input/path validation.
+3. Validate inputs at the boundary. Bound result counts, output size, timeout duration, and accepted ranges.
+4. Never claim shell execution is sandboxed. A configured cwd is not a filesystem or process sandbox.
+5. Treat paths, commands, URLs, browser state, and identifiers as untrusted.
+6. Never log secrets, passwords, authorization headers, OAuth codes, or sensitive payloads.
+7. For state-changing tools, preserve approval behavior and test allow, approval, deny/block, timeout, and cancellation as applicable.
 
-## Runtime entry points
+## Process and resource lifecycle
 
-- `src/index.ts`: application startup, MCP transport selection, Bun HTTP server, HTTP API/auth routing, terminal WebSocket upgrade, and graceful shutdown.
-- `src/mcp/server.ts`: creates the MCP server and registers tools.
-- `src/mcp/tools/`: tool registration and implementations, including built-ins and dynamically discovered native OMP tools.
-- `src/app/http.ts`: MCP Streamable HTTP session handling.
-- `src/dashboard/index.ts`: authenticated runtime/control API consumed by OMP Control; it does not serve the dashboard frontend.
-- `src/dashboard/events.ts`: server-sent dashboard events.
-- `src/control-plane/tools/`: tool catalog metadata, exposure, permission policies, and custom rule validation/evaluation.
-- `src/control-plane/db/`: SQLite schema and Drizzle migrations.
-- `src/approval/`: pending tool approval lifecycle.
-- `src/terminal/`: terminal session management and WebSocket I/O.
-- `src/tunnels/manager.ts`: host-local Cloudflare Quick Tunnel process management and tunnel events.
-- `src/lib/http-auth.ts` and `src/lib/oauth.ts`: internal API authentication and optional OAuth flows.
-- `src/lib/config.ts`: environment configuration.
-- `deploy/systemd/` and `Makefile`: service installation and lifecycle.
+- Every subprocess needs an owner, timeout policy, abort behavior, bounded output capture, and exit/stream handling.
+- Temporary children must be awaited on success, failure, timeout, abort, and shutdown. Signal process groups only when Toolsmith created and owns those groups.
+- A deliberately backgrounded process needs explicit tracking and stop semantics.
+- Terminal shutdown must dispose every managed terminal, close WebSocket clients, wait for exit within a bound, and force-kill only as fallback.
+- Shutdown must be idempotent and stop accepting new work before disposing resources.
+- Do not infer a leak from a worker's name or age. Measure PID, RSS/PSS, process count, thread count, cgroup memory, and workload.
 
-## Transport and HTTP surfaces
+## Persistence and configuration
 
-The MCP transport is selected by `MCP_TRANSPORT`:
+- SQLite schema changes require a Drizzle migration; do not edit production data manually.
+- Tests must use NODE_ENV=test and isolated data. Never run tests against /var/lib/omp-mcp or another production database.
+- Prefer TOOLSMITH_* variables. Legacy OMP_* aliases remain temporarily. Do not remove aliases, change data paths, rotate encryption keys, or rename service units until migration is tested.
+- The production data-directory fallback remains /var/lib/omp-mcp during this transition by design. Source branding does not authorize moving existing data.
 
-- `stdio`: MCP over stdin/stdout.
-- `http`: MCP Streamable HTTP.
-- `both`: run both transports in one process.
+## API and console compatibility
 
-For HTTP, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, and `MCP_HTTP_PATH` configure the listener. The common default path is `/mcp`; the code-level default host/port may differ from the systemd deployment defaults, so check the active environment when troubleshooting.
+- The backend is authoritative for exposure and execution permissions.
+- Endpoint changes must update auth, method validation, tests, and docs together.
+- Keep Toolsmith Console clients aligned with the backend API. Test changes in the separate console repository independently.
+- Keep legacy service/path references only where required for documented compatibility; do not introduce new dependencies on those names.
 
-The same HTTP server hosts authenticated runtime/control APIs and the terminal WebSocket endpoint. OAuth endpoints are handled separately from the internal Bearer-token-protected APIs.
+## Validation workflow
 
-## State and persistence
+Run in the local development checkout:
 
-- The control-plane SQLite database is created at `$OMP_DATA_DIR/control-plane.db`; `OMP_DATA_DIR` defaults to `/var/lib/omp-mcp` in application code.
-- Drizzle migrations are applied at startup.
-- Tool configurations, permission groups, call logs, workspace preferences, editor/session metadata, and OAuth records are persisted in the control database according to the schema.
-- Some runtime state is intentionally process-local. In particular, active tunnel process records and terminal process handles do not survive a process restart as live processes.
+    bun run typecheck
+    bun test
+    bun run build
+    git diff --check
 
-## Tool catalog and execution policy
-
-OMP-MCP is the source of truth for `GET /api/tools`. The catalog combines registered OMP-MCP built-ins with native tools available from the installed OMP runtime.
-
-- Exposure controls whether a tool is available to MCP clients.
-- Permission policies determine whether a tool call is allowed, requires approval, or is blocked.
-- Custom permission rules are validated, normalized, persisted, and evaluated by the runtime before execution.
-- The dashboard UI is not a security boundary; enforce policy on the server.
-- Root-command rules apply to the opt-in high-risk `sudo_exec` capability. They use exact command and argument matching, and seeded examples are disabled by default.
-
-## Authentication and trust boundaries
-
-- Internal OMP Control/runtime API requests use `OMP_API_TOKEN` Bearer authentication.
-- Optional remote MCP OAuth is configured separately with `MCP_PUBLIC_URL`, `OMP_OAUTH_USERNAME`, and `OMP_OAUTH_PASSWORD`.
-- OAuth access tokens are not OMP Control browser sessions.
-- Treat tool input, workspace paths, upstream requests, browser-relay sessions, and remote client metadata as untrusted.
-- Keep credentials, tokens, OAuth codes, and collaboration links out of logs and API responses.
-- Bind tunnel targets to permitted loopback HTTP(S) URLs; do not turn tunnel management into an arbitrary network proxy.
-
-## Eventing and lifecycle
-
-- Dashboard updates use server-sent events where supported.
-- Terminal I/O uses WebSockets.
-- MCP HTTP sessions are tracked and closed during graceful shutdown.
-- Shutdown stops the HTTP server, stops managed tunnels, closes MCP HTTP sessions, and closes the MCP server.
-
-## Change guidance
-
-For runtime or security behavior, implement and test the authoritative change in OMP-MCP. Update the OMP Control UI/client only as needed to expose that behavior. When changing an API route, update its authentication expectations, method validation, tests, and README documentation. When changing persistence, add a migration rather than relying on an undocumented manual database change.
+HTTP integration tests must use a dedicated loopback port and test credentials. Add regression tests for process cleanup, timeout, abort, and output caps when changing subprocess code. Review git status and the complete diff; do not overwrite unrelated changes. Do not run systemd commands, production migrations, install/update/purge scripts, or deployment commands as part of tests. Commit, publish, and deploy only when explicitly authorized.

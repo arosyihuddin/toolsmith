@@ -13,7 +13,7 @@ async function run(command: string, args: string[] = []) {
 }
 
 function tempPath() {
-  return path.join(os.tmpdir(), `omp-mcp-screenshot-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+  return path.join(os.tmpdir(), `toolsmith-screenshot-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
 }
 
 export async function takeMacScreenshot(outputPath?: string) {

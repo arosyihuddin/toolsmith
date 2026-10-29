@@ -9,10 +9,11 @@ if (transport !== "stdio" && transport !== "http" && transport !== "both") {
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   logLevel: process.env.LOG_LEVEL ?? "info",
-  ompDefaultCwd:
-    process.env.NODE_ENV == "development"
+  defaultCwd:
+    process.env.TOOLSMITH_DEFAULT_CWD ?? process.env.OMP_DEFAULT_CWD ??
+    (process.env.NODE_ENV === "development"
       ? process.cwd()
-      : "/var/lib/omp-mcp/workspace",
+      : "/var/lib/omp-mcp/workspace"),
   transport,
   httpHost: process.env.MCP_HTTP_HOST ?? "127.0.0.1",
   httpPort: Number(process.env.MCP_HTTP_PORT ?? "48765"),

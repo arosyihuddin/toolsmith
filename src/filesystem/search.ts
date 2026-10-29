@@ -13,28 +13,41 @@ async function runCommand(command: string[], options: CommandOptions): Promise<s
     throw new Error(`${binary ?? "search command"} is not installed`);
   }
 
-  const process = Bun.spawn(command, {
+  const child = Bun.spawn(command, {
     cwd: options.cwd,
     stdout: "pipe",
     stderr: "pipe",
+    detached: process.platform !== "win32",
   });
 
   let aborted = false;
+  let timedOut = false;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  const terminate = (signal: "SIGTERM" | "SIGKILL") => {
+    try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal); else child.kill(signal); }
+    catch { try { child.kill(signal); } catch {} }
+    if (signal === "SIGTERM") forceKillTimer ??= setTimeout(() => terminate("SIGKILL"), 1_000);
+  };
   const abort = () => {
     aborted = true;
-    process.kill();
+    terminate("SIGTERM");
   };
-  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted) abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
 
-  const timeout = setTimeout(() => process.kill(), options.timeoutMs);
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    terminate("SIGTERM");
+  }, options.timeoutMs);
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
-      process.exited,
-      new Response(process.stdout).text(),
-      new Response(process.stderr).text(),
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
     ]);
 
     if (aborted) throw new Error("Search aborted");
+    if (timedOut) throw new Error(`${binary} timed out after ${options.timeoutMs}ms`);
     if (exitCode !== 0) {
       const message = stderr.trim();
       throw new Error(message || `${binary} exited with code ${exitCode}`);
@@ -43,6 +56,7 @@ async function runCommand(command: string[], options: CommandOptions): Promise<s
     return stdout;
   } finally {
     clearTimeout(timeout);
+    if (forceKillTimer) clearTimeout(forceKillTimer);
     options.signal?.removeEventListener("abort", abort);
   }
 }

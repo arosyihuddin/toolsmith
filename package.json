@@ -1,5 +1,5 @@
 {
-  "name": "omp-mcp",
+  "name": "toolsmith",
   "version": "0.3.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@ast-grep/cli": "^0.51.0",
     "@modelcontextprotocol/sdk": "^1.20.1",
-    "@oh-my-pi/pi-coding-agent": "18.4.10",
     "drizzle-orm": "^0.45.3",
     "pino": "^10.3.1"
   },

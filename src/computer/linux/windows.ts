@@ -18,14 +18,6 @@ export interface ActiveWindow {
   pid: number | null;
 }
 
-export interface ProcessInfo {
-  pid: number;
-  parent_pid: number | null;
-  user: string;
-  cpu_percent: number;
-  memory_percent: number;
-  command: string;
-}
 
 async function run(command: string, args: string[] = []) {
   const proc = Bun.spawn([command, ...args], { stdout: "pipe", stderr: "pipe" });
@@ -98,20 +90,4 @@ export async function closeLinuxWindow(id: string): Promise<void> {
 
 export async function moveLinuxWindow(id: string, workspace: string): Promise<void> {
   await run("hyprctl", ["dispatch", "movetoworkspacesilent", `${workspace},address:${id}`]);
-}
-
-export async function listLinuxProcesses(): Promise<ProcessInfo[]> {
-  const raw = await run("ps", ["-eo", "pid=,ppid=,user=,pcpu=,pmem=,args="]); 
-  return raw.trim().split("\n").filter(Boolean).map((line) => {
-    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+([\d.]+)\s+([\d.]+)\s+(.*)$/);
-    if (!match) throw new Error(`Unable to parse process entry: ${line}`);
-    return {
-      pid: Number(match[1]),
-      parent_pid: Number(match[2]),
-      user: match[3],
-      cpu_percent: Number(match[4]),
-      memory_percent: Number(match[5]),
-      command: match[6],
-    };
-  });
 }

@@ -25,7 +25,7 @@ type TerminalRecord = TerminalInfo & {
 };
 
 const MAX_BUFFER = 256 * 1024;
-const TERMINAL_ROOT = resolve(process.env.OMP_TERMINAL_ROOT ?? homedir());
+const TERMINAL_ROOT = resolve(process.env.TOOLSMITH_TERMINAL_ROOT ?? process.env.OMP_TERMINAL_ROOT ?? homedir());
 
 function workspaceCwd(input?: string) {
   const root = TERMINAL_ROOT;
@@ -105,6 +105,7 @@ class TerminalManager {
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
       },
+      detached: true,
       terminal: {
         cols: 120,
         rows: 30,
@@ -198,9 +199,7 @@ class TerminalManager {
     try {
       terminal.pty.close();
     } catch {}
-    try {
-      terminal.process.kill("SIGTERM");
-    } catch {}
+    this.signalProcessGroup(terminal, "SIGTERM");
     this.terminals.delete(id);
     for (const client of terminal.clients) {
       try {
@@ -209,6 +208,42 @@ class TerminalManager {
     }
     terminal.clients.clear();
     return true;
+  }
+
+  async disposeAll(gracePeriodMs = 2_000) {
+    const terminals = [...this.terminals.values()];
+    if (terminals.length === 0) return;
+
+    for (const terminal of terminals) this.dispose(terminal.id);
+
+    const exited = Promise.all(terminals.map((terminal) => terminal.process.exited.then(() => undefined, () => undefined)));
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const graceful = await Promise.race([
+      exited.then(() => true),
+      new Promise<boolean>((resolve) => {
+        graceTimer = setTimeout(() => resolve(false), gracePeriodMs);
+      }),
+    ]);
+    if (graceTimer) clearTimeout(graceTimer);
+
+    if (!graceful) {
+      for (const terminal of terminals) {
+        if (terminal.process.exitCode !== null) continue;
+        this.signalProcessGroup(terminal, "SIGKILL");
+      }
+    }
+
+    await Promise.all(terminals.map((terminal) => terminal.process.exited.then(() => undefined, () => undefined)));
+  }
+
+  private signalProcessGroup(terminal: TerminalRecord, signal: NodeJS.Signals) {
+    const pid = terminal.process.pid;
+    if (pid === undefined) return;
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      try { terminal.process.kill(signal); } catch {}
+    }
   }
 
   private async watchExit(terminal: TerminalRecord) {
@@ -249,7 +284,7 @@ class TerminalManager {
 
 function processEnv() {
   const env = { ...Bun.env };
-  // Do not leak this OMP-MCP server's own listener settings into interactive
+  // Do not leak this Toolsmith server's own listener settings into interactive
   // shells. They would override a workspace's .env when launching Bun again.
   delete env.MCP_TRANSPORT;
   delete env.MCP_HTTP_HOST;

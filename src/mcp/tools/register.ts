@@ -70,14 +70,14 @@ export function registerExposedTool<OutputArgs extends ZodRawShapeCompat | AnySc
       });
       logId = log.id;
       const annotations = definition.annotations;
-      const risk = name.startsWith("omp_") ? "isolated" : annotations?.readOnlyHint ? "low" : (annotations?.openWorldHint || ["bash", "eval", "sudo_exec", "mouse_click", "mouse_drag", "keyboard_press", "keyboard_hotkey", "keyboard_type"].includes(name)) ? "high" : "medium";
+      const risk = annotations?.readOnlyHint ? "low" : (annotations?.openWorldHint || ["bash", "sudo_exec", "mouse_click", "mouse_drag", "keyboard_press", "keyboard_hotkey", "keyboard_type"].includes(name)) ? "high" : "medium";
       const toolPermission = getToolPermission(name, risk);
       const policy = toolPermission.permission;
       const customAction = policy === "custom"
         ? evaluateCustomPermissionRule(toolPermission.customRule, { name, risk, args })
         : null;
       if (policy === "blocked" || customAction === "block") {
-        const message = `Tool '${name}' is blocked by the OMP-MCP permission policy.`;
+        const message = `Tool '${name}' is blocked by the Toolsmith permission policy.`;
         updateToolCallLog(logId, {
           status: "error",
           durationMs: Math.round(performance.now() - startedAt),

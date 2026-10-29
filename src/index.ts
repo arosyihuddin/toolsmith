@@ -9,25 +9,24 @@ import { config } from "./lib/config";
 import { stopAllTunnels } from "./tunnels/manager";
 import { authorizeHttpRequest } from "./lib/http-auth";
 import { handleOAuthRequest, isOAuthEndpoint } from "./lib/oauth";
-import { nativeRuntime } from "./omp/native";
 
 let server: Awaited<ReturnType<typeof createServer>> | undefined;
 let httpServer: ReturnType<typeof Bun.serve> | undefined;
 
-await mkdir(config.ompDefaultCwd, { recursive: true });
+await mkdir(config.defaultCwd, { recursive: true });
 
 server = await createServer();
 if (config.transport === "stdio" || config.transport === "both") {
-  logger.info({ transport: "stdio" }, "OMP MCP server starting");
+  logger.info({ transport: "stdio" }, "Toolsmith server starting");
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  logger.info({ transport: "stdio" }, "OMP MCP server connected");
+  logger.info({ transport: "stdio" }, "Toolsmith server connected");
 } else {
   // Register tool schemas at startup even in HTTP-only mode, before the first
   // MCP client connects and the dashboard requests its tool catalog.
-  logger.info({ transport: "http", schemas: "initialized" }, "OMP tool schemas initialized");
+  logger.info({ transport: "http", schemas: "initialized" }, "Toolsmith tool schemas initialized");
 }
 
 if (config.transport === "http" || config.transport === "both") {
@@ -87,18 +86,24 @@ if (config.transport === "http" || config.transport === "both") {
       transport: "streamable-http",
       url: `http://${config.httpHost}:${httpServer.port}${config.httpPath}`,
     },
-    "OMP MCP Streamable HTTP server listening",
+    "Toolsmith MCP Streamable HTTP server listening",
   );
 }
 
-const shutdown = async (signal: string) => {
-  logger.info({ signal }, "OMP MCP server shutting down");
+let shutdownPromise: Promise<void> | undefined;
 
-  httpServer?.stop();
-  await stopAllTunnels();
-  await closeMcpHttpSessions();
-  await nativeRuntime.dispose();
-  await server?.close();
+const shutdown = (signal: string) => {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    logger.info({ signal }, "Toolsmith server shutting down");
+
+    httpServer?.stop();
+    await stopAllTunnels();
+    await closeMcpHttpSessions();
+    await terminalManager.disposeAll();
+    await server?.close();
+  })();
+  return shutdownPromise;
 };
 
 process.once("SIGINT", () => void shutdown("SIGINT"));

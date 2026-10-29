@@ -22,7 +22,7 @@ export function registerFilesystemTools(server: McpServer) {
     const args = { pattern, path, type, hidden, max_results, max_depth };
     logger.debug({ tool: "fs_find", args }, "MCP tool call");
     try {
-      const value = await fsFind(args, config.ompDefaultCwd, extra.signal);
+      const value = await fsFind(args, config.defaultCwd, extra.signal);
       logger.debug({ tool: "fs_find", durationMs: Math.round(performance.now() - startedAt), result: logValue(value) }, "MCP tool call completed");
       return result(value);
     } catch (error) {
@@ -43,7 +43,7 @@ export function registerFilesystemTools(server: McpServer) {
     const args = { pattern, path, glob, hidden, max_results, max_depth, fixed_strings };
     logger.debug({ tool: "fs_grep", args }, "MCP tool call");
     try {
-      const value = await fsGrep(args, config.ompDefaultCwd, extra.signal);
+      const value = await fsGrep(args, config.defaultCwd, extra.signal);
       logger.debug({ tool: "fs_grep", durationMs: Math.round(performance.now() - startedAt), result: logValue(value) }, "MCP tool call completed");
       return result(value);
     } catch (error) {

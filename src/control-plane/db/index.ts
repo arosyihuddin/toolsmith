@@ -7,7 +7,13 @@ import * as schema from "./schema";
 import { config } from "../../lib/config";
 
 const dataDir = resolve(
-  config.nodeEnv == "development" ? "./data" : "/var/lib/omp-mcp",
+  process.env.TOOLSMITH_DATA_DIR ??
+    process.env.OMP_DATA_DIR ??
+    (config.nodeEnv === "development"
+      ? "./data"
+      : config.nodeEnv === "test"
+        ? "./.test-data"
+        : "/var/lib/omp-mcp"),
 );
 
 mkdirSync(dataDir, { recursive: true });

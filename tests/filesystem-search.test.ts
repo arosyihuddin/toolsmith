@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fsFind } from "../src/filesystem/search";
+import { fsFind, fsGrep } from "../src/filesystem/search";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -10,6 +10,28 @@ afterEach(async () => {
 });
 
 describe("filesystem find", () => {
+  test("rejects an already-aborted external search without leaving a child process", async () => {
+    if (!Bun.which("rg")) return;
+    const root = await mkdtemp(join(tmpdir(), "omp-fs-abort-"));
+    directories.push(root);
+    await writeFile(join(root, "sample.txt"), "search me");
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(fsGrep({ pattern: "search", path: root }, root, controller.signal)).rejects.toThrow("Search aborted");
+  });
+
+  test("cancels when the signal fires while path validation is pending", async () => {
+    if (!Bun.which("rg")) return;
+    const root = await mkdtemp(join(tmpdir(), "omp-fs-race-"));
+    directories.push(root);
+    await writeFile(join(root, "sample.txt"), "search me");
+    const controller = new AbortController();
+    const pending = fsGrep({ pattern: "search", path: root }, root, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toThrow("Search aborted");
+  });
+
   test("searches files without requiring fd and respects hidden-file settings", async () => {
     const root = await mkdtemp(join(tmpdir(), "omp-fs-find-"));
     directories.push(root);
