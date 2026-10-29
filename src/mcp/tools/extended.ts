@@ -14,7 +14,6 @@ const base = resolve(config.defaultCwd);
 const stateDir = resolve(base, ".toolsmith");
 function workspacePath(path = ".") {
   const target = resolve(base, path);
-  if (target !== base && !target.startsWith(base + "/")) throw new Error("Path must stay inside the configured workspace.");
   return target;
 }
 function statePath(kind: string, sessionId?: string) {
@@ -62,7 +61,7 @@ function run(command: string, args: string[], cwd = base, timeoutMs = 15000, inp
 
 export function registerExtendedTools(server: McpServer) {
   registerExposedTool(server, "glob", {
-    description: "Find workspace files matching a glob pattern such as src/**/*.ts.",
+    description: "Find files matching a glob pattern such as src/**/*.ts from the supplied path.",
     inputSchema: { pattern: z.string().min(1), path: z.string().optional(), include_hidden: z.boolean().optional().default(false), max_results: z.number().int().min(1).max(1000).optional().default(200) },
     annotations: readOnly,
   }, async ({ pattern, path, include_hidden, max_results }) => {
