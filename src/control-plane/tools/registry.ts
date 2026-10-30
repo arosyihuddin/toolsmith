@@ -7,11 +7,7 @@ import {
   type PermissionMode,
   type PermissionSection,
 } from "./permissions";
-import {
-  getToolInputFields,
-  registerToolInputSchema,
-  type InputField,
-} from "./input-schema";
+import { getToolInputFields, type InputField } from "./input-schema";
 
 export type ToolRisk = "low" | "medium" | "high" | "isolated";
 export type ToolCategory =
@@ -51,12 +47,42 @@ const staticTools: Omit<
   | "sectionCustomRule"
   | "inputFields"
 >[] = [
-  ["read", "Toolsmith", "low", "Read UTF-8 text files within the configured workspace."],
-  ["write", "Toolsmith", "high", "Write UTF-8 text files within the configured workspace."],
-  ["edit", "Toolsmith", "high", "Replace a unique text match in a workspace file."],
-  ["bash", "Toolsmith", "high", "Run a shell command in the configured workspace, subject to permissions and approval."],
-  ["find", "Toolsmith", "low", "Find files and directories within the configured workspace."],
-  ["grep", "Toolsmith", "low", "Search file contents within the configured workspace."],
+  [
+    "read",
+    "Toolsmith",
+    "low",
+    "Read UTF-8 text files within the configured workspace.",
+  ],
+  [
+    "write",
+    "Toolsmith",
+    "high",
+    "Write UTF-8 text files within the configured workspace.",
+  ],
+  [
+    "edit",
+    "Toolsmith",
+    "high",
+    "Replace a unique text match in a workspace file.",
+  ],
+  [
+    "bash",
+    "Toolsmith",
+    "high",
+    "Run a shell command in the configured workspace, subject to permissions and approval.",
+  ],
+  [
+    "find",
+    "Toolsmith",
+    "low",
+    "Find files and directories within the configured workspace.",
+  ],
+  [
+    "grep",
+    "Toolsmith",
+    "low",
+    "Search file contents within the configured workspace.",
+  ],
   [
     "system_info",
     "System",
@@ -100,65 +126,10 @@ const staticTools: Omit<
     "Get the desktop window that currently has keyboard focus.",
   ],
   [
-    "window_focus",
-    "Computer",
-    "medium",
-    "Focus a desktop window by its window id.",
-  ],
-  [
-    "window_close",
-    "Computer",
-    "medium",
-    "Close a desktop window by its window id.",
-  ],
-  [
-    "window_move",
-    "Computer",
-    "medium",
-    "Move a desktop window to a workspace by its window id.",
-  ],
-  [
     "app_list",
     "Computer",
     "low",
     "List desktop applications available on the operating system. Supports optional search and result limit.",
-  ],
-  [
-    "mouse_move",
-    "Computer",
-    "medium",
-    "Move the mouse pointer to absolute screen coordinates.",
-  ],
-  [
-    "mouse_click",
-    "Computer",
-    "high",
-    "Click the mouse at the current cursor position. Defaults to left click.",
-  ],
-  [
-    "mouse_drag",
-    "Computer",
-    "high",
-    "Drag the left mouse button from one screen coordinate to another.",
-  ],
-  ["mouse_scroll", "Computer", "medium", "Scroll the mouse wheel."],
-  [
-    "keyboard_press",
-    "Computer",
-    "high",
-    "Press and release a keyboard key, or a key combination such as Ctrl+C.",
-  ],
-  [
-    "keyboard_hotkey",
-    "Computer",
-    "high",
-    "Press a keyboard shortcut using the supplied modifier/key sequence.",
-  ],
-  [
-    "keyboard_type",
-    "Computer",
-    "high",
-    "Type literal text into the currently focused application.",
   ],
   [
     "screenshot",
@@ -197,13 +168,33 @@ const staticTools: Omit<
     "Execute a root command directly. Exact matches to enabled root-command rules bypass approval; other commands follow the Toolsmith permission policy and required approval, without shell parsing.",
   ],
   ["glob", "Files", "low", "Find workspace files matching a glob pattern."],
-  ["eval", "Execution", "high", "Execute JavaScript or Python code in a child process."],
-  ["context_notes", "Agent Workflow", "medium", "Read and update context notes scoped to the current session."],
+  [
+    "eval",
+    "Execution",
+    "high",
+    "Execute JavaScript or Python code in a child process.",
+  ],
+  [
+    "context_notes",
+    "Agent Workflow",
+    "medium",
+    "Read and update context notes scoped to the current session.",
+  ],
   ["wait", "Agent Workflow", "low", "Wait for a bounded duration."],
   ["todo", "Agent Workflow", "medium", "Manage a session-scoped task list."],
-  ["ast_grep", "Code Development", "low", "Search code using structural AST patterns."],
+  [
+    "ast_grep",
+    "Code Development",
+    "low",
+    "Search code using structural AST patterns.",
+  ],
   ["ast_edit", "Code Development", "high", "Apply AST-based code rewrites."],
-  ["github", "GitHub", "low", "Use GitHub CLI for repository, issue, pull request, and workflow queries."],
+  [
+    "github",
+    "GitHub",
+    "low",
+    "Use GitHub CLI for repository, issue, pull request, and workflow queries.",
+  ],
 ].map(([name, group, risk, description]) => ({
   name,
   group,

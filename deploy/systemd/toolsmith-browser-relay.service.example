@@ -1,5 +1,5 @@
 [Unit]
-Description=OMP Browser Relay
+Description=Toolsmith Browser Relay
 After=network.target
 
 [Service]

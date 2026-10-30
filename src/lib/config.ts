@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 const transport = process.env.MCP_TRANSPORT ?? "http";
 
 if (transport !== "stdio" && transport !== "http" && transport !== "both") {
@@ -13,7 +15,9 @@ export const config = {
     process.env.TOOLSMITH_DEFAULT_CWD ?? process.env.OMP_DEFAULT_CWD ??
     (process.env.NODE_ENV === "development"
       ? process.cwd()
-      : "/var/lib/omp-mcp/workspace"),
+      : existsSync("/var/lib/omp-mcp/workspace") && !existsSync("/var/lib/toolsmith/workspace")
+        ? "/var/lib/omp-mcp/workspace"
+        : "/var/lib/toolsmith/workspace"),
   transport,
   httpHost: process.env.MCP_HTTP_HOST ?? "127.0.0.1",
   httpPort: Number(process.env.MCP_HTTP_PORT ?? "48765"),

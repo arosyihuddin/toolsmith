@@ -70,7 +70,7 @@ export function registerExposedTool<OutputArgs extends ZodRawShapeCompat | AnySc
       });
       logId = log.id;
       const annotations = definition.annotations;
-      const risk = annotations?.readOnlyHint ? "low" : (annotations?.openWorldHint || ["bash", "sudo_exec", "mouse_click", "mouse_drag", "keyboard_press", "keyboard_hotkey", "keyboard_type"].includes(name)) ? "high" : "medium";
+      const risk = annotations?.readOnlyHint ? "low" : (annotations?.openWorldHint || ["bash", "sudo_exec"].includes(name)) ? "high" : "medium";
       const toolPermission = getToolPermission(name, risk);
       const policy = toolPermission.permission;
       const customAction = policy === "custom"

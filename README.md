@@ -73,7 +73,7 @@ The dashboard frontend lives in the separate toolsmith-console project and consu
 
 ## Legacy deployment migration boundary
 
-Deployment scripts and systemd templates in this checkout still contain legacy names and paths, including /opt/omp-mcp, /var/lib/omp-mcp, and omp-mcp.service. They have NOT been renamed as part of this local source rebrand. Do not run install/update/uninstall/purge targets against an existing host until a non-production migration and rollback procedure has been validated. Existing paths, service units, secrets, database contents, permissions, and ownership must be preserved during migration.
+Deployment scripts and systemd templates in this checkout still contain legacy names and paths, while legacy installations may still use /opt/omp-mcp, /var/lib/omp-mcp, and omp-mcp.service. New installations use /opt/toolsmith, /var/lib/toolsmith, and toolsmith.service. Do not switch an existing host between legacy and new systemd units until a maintenance window, backup, and rollback procedure are prepared. Existing paths, service units, secrets, database contents, permissions, and ownership must be preserved during migration.
 
 ## Engineering rules
 

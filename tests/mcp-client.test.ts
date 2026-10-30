@@ -105,7 +105,7 @@ describe("MCP Streamable HTTP integration", () => {
 
       expect(result.isError).not.toBe(true);
       const content = result.content as Array<{ type: string; text?: string }> | undefined;
-      expect(content?.some((item) => item.type === "text" && item.text?.includes("omp-mcp"))).toBe(true);
+      expect(content?.some((item) => item.type === "text" && item.text?.includes("toolsmith"))).toBe(true);
     } finally {
       await transport.close();
     }
