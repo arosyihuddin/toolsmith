@@ -27,7 +27,7 @@ For a normal start:
 bun run start
 ```
 
-Configure `.env` locally; never commit real secrets. Use `.env.example` as the template.
+For installed deployments, configure ~/.toolsmith/config/config.yml; use config.example.yml as the YAML template. Environment variables may override YAML values. Keep real credentials and secrets out of Git. The root .env is only for local development/legacy workflows.
 
 ## Validation
 
@@ -56,7 +56,7 @@ Add or update tests for changes to tool registration, policy evaluation, authent
 - Persist durable control-plane state in the SQLite schema using Drizzle.
 - Add a migration for schema changes and ensure it is applied by the existing startup migration flow.
 - Do not rely on manually editing deployed databases.
-- Document any new environment variables in both `.env.example` and `README.md`.
+- Document new configuration keys in config.example.yml and README.md. Keep legacy environment-variable compatibility documented where it remains supported.
 
 ## Host operations and security
 
