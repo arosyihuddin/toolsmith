@@ -1,6 +1,8 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { homedir } from "node:os";
 import { fsFind, fsGrep } from "../../filesystem/search";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -35,17 +37,28 @@ export function registerCoreTools(server: McpServer) {
     },
     async ({ path, start_line, end_line }) => {
       try {
-        const text = await readFile(workspacePath(path), "utf8");
+        const target = workspacePath(path);
+        const text = await readFile(target, "utf8");
         const lines = text.split("\n");
-        const start = Math.max(1, Number(start_line ?? 1));
-        const end = Math.min(lines.length, Number(end_line ?? lines.length));
-        return result({
-          path,
-          start_line: start,
-          end_line: end,
-          total_lines: lines.length,
-          content: lines.slice(start - 1, end).join("\n"),
-        });
+        const start = Math.min(lines.length, Math.max(1, Number(start_line ?? 1)));
+        const end = Math.min(lines.length, Math.max(start, Number(end_line ?? lines.length)));
+        const home = homedir();
+        const relativePath = target.startsWith(home + "/")
+          ? "~/" + target.slice(home.length + 1)
+          : target;
+        const anchor = createHash("sha1").update(text).digest("hex").slice(0, 4).toUpperCase();
+        const numberedContent = lines
+          .slice(start - 1, end)
+          .map((line, index) => String(start + index) + ":" + line)
+          .join("\n");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "[" + relativePath + "#" + anchor + "]\n" + numberedContent,
+            },
+          ],
+        };
       } catch (error) {
         return errorResult(errorMessage(error));
       }
