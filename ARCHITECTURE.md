@@ -48,6 +48,7 @@ toolsmith/
 │   │   └── root-commands.ts      # aturan allowlist perintah privileged
 │   ├── dashboard/                # HTTP API untuk Toolsmith Console
 │   ├── terminal/                 # lifecycle terminal dan WebSocket I/O
+│   ├── process/                  # registry lifecycle subprocess milik Toolsmith
 │   ├── tunnels/                  # lifecycle proses Cloudflare Quick Tunnel
 │   ├── approval/                 # state approval, keputusan, pembatalan
 │   ├── computer/
@@ -123,7 +124,7 @@ Tool handler
     ↓
 Capability / use case
     ├── filesystem
-    ├── terminal / process
+    ├── terminal / process registry
     ├── computer
     ├── system
     ├── tunnel
@@ -177,6 +178,9 @@ Setiap subprocess harus memiliki:
 Aturan tambahan:
 
 - Proses background harus diregistrasikan dan memiliki semantik stop yang jelas.
+- Subprocess bash, eval, sudo_exec, terminal, dan tunnel yang dikelola didaftarkan ke src/process/; pemilik aslinya tetap bertanggung jawab untuk stop, exit, dan cleanup.
+- Process Monitor hanya menampilkan proses yang didaftarkan oleh instance Toolsmith aktif. Registry bersifat in-memory; riwayat tidak dipulihkan setelah restart dan PID dari proses lain tidak boleh dihentikan.
+- Resource Linux dibaca dari /proc; metrik yang tidak tersedia pada OS lain harus ditampilkan sebagai tidak tersedia, bukan diperkirakan.
 - Hanya kirim signal ke process group yang dibuat dan dimiliki Toolsmith.
 - Terminal shutdown harus menghentikan sesi yang dikelola, menutup WebSocket, menunggu proses keluar dalam batas waktu, lalu melakukan force-kill hanya sebagai fallback.
 - Shutdown harus idempotent dan menghentikan penerimaan pekerjaan baru sebelum melepas resource.

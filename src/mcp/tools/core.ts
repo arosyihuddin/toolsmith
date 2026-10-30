@@ -9,6 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerExposedTool } from "./register";
 import { config } from "../../lib/config";
 import { errorMessage, errorResult, result } from "./shared";
+import { registerManagedProcess, terminateProcessGroup } from "../../process";
 
 const safeRead = {
   readOnlyHint: true,
@@ -118,6 +119,7 @@ export function registerCoreTools(server: McpServer) {
       if (extra.signal?.aborted)
         return errorResult("Command aborted before start.");
       let proc: ReturnType<typeof spawn> | undefined;
+      let processHandle: ReturnType<typeof registerManagedProcess> | undefined;
       let timedOut = false;
       let aborted = false;
       let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -165,6 +167,7 @@ export function registerCoreTools(server: McpServer) {
           stdio: ["ignore", "pipe", "pipe"],
           detached: process.platform !== "win32",
         });
+        if (proc.pid) processHandle = registerManagedProcess({ pid: proc.pid, source: "bash", kind: "command", label: "Shell command", cwd: workspacePath(), stop: () => new Promise<void>((resolveStop) => { if (!proc || proc.exitCode !== null) return resolveStop(); proc.once("close", () => resolveStop()); terminate("SIGTERM"); }) });
         proc.stdout?.on("data", (chunk: Buffer) => {
           stdoutBytes = appendCapped(stdout, chunk, stdoutBytes, 50_000);
         });
@@ -181,6 +184,8 @@ export function registerCoreTools(server: McpServer) {
           proc!.once("error", reject);
           proc!.once("close", (code) => resolveExit(code ?? 1));
         });
+        if (proc?.pid && process.platform !== "win32") await terminateProcessGroup(proc.pid);
+        processHandle?.finish(exitCode);
         return aborted
           ? errorResult("Command aborted.")
           : result({
@@ -193,6 +198,7 @@ export function registerCoreTools(server: McpServer) {
             });
       } catch (error) {
         terminate("SIGTERM");
+        processHandle?.finish(1);
         return errorResult(errorMessage(error));
       } finally {
         if (timeout) clearTimeout(timeout);

@@ -1,4 +1,5 @@
 import { subscribeDashboardEvents } from "./events";
+import { getProcessSnapshots } from "../process";
 import { config } from "../lib/config";
 import { listApprovals } from "../approval";
 import { countToolCallsToday } from "../control-plane/logs";
@@ -113,6 +114,21 @@ export async function handleEventsApi(request: Request, url: URL): Promise<Respo
         send(event.type, event.data);
       });
       const telemetryTimer = setInterval(() => void sendTelemetry(), 2_000);
+      let processMetricsBusy = false;
+      const sendProcessMetrics = async () => {
+        if (processMetricsBusy) return;
+        processMetricsBusy = true;
+        try {
+          const processes = await getProcessSnapshots();
+          if (processes.some((item) => item.status === "running" || item.status === "stopping")) {
+            send("process.metrics", { processes });
+          }
+        } finally {
+          processMetricsBusy = false;
+        }
+      };
+      void sendProcessMetrics();
+      const processMetricsTimer = setInterval(() => void sendProcessMetrics(), 1_000);
       const heartbeat = setInterval(
         () => send("ping", { time: new Date().toISOString() }),
         20_000,
@@ -121,6 +137,7 @@ export async function handleEventsApi(request: Request, url: URL): Promise<Respo
       cleanup = () => {
         unsubscribe();
         clearInterval(telemetryTimer);
+        clearInterval(processMetricsTimer);
         clearInterval(heartbeat);
         request.signal.removeEventListener("abort", onAbort);
         try {

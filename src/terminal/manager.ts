@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { relative, sep } from "node:path";
 
 import type { TerminalInfo, TerminalRecord, TerminalScope } from "./types";
+import { registerManagedProcess } from "../process";
 import { processEnv, safeWrite, stripLeadingWhitespaceLine, trimOutputBuffer, workspaceCwd } from "./utils";
 
 export class TerminalManager {
   private terminals = new Map<string, TerminalRecord>();
+  private processHandles = new Map<string, ReturnType<typeof registerManagedProcess>>();
 
   list(scope?: TerminalScope, workspaceRoot?: string): TerminalInfo[] {
     const normalizedRoot = workspaceRoot === undefined ? undefined : workspaceCwd(workspaceRoot);
@@ -86,6 +88,7 @@ export class TerminalManager {
     };
 
     this.terminals.set(id, terminal);
+    this.processHandles.set(id, registerManagedProcess({ pid: process.pid, source: "terminal", kind: "terminal", label: terminal.title, cwd: target, stop: async () => { this.dispose(id); await process.exited; } }));
     record = terminal;
     void this.watchExit(terminal);
     return this.get(id)!;
@@ -196,6 +199,8 @@ export class TerminalManager {
 
   private async watchExit(terminal: TerminalRecord) {
     const exitCode = await terminal.process.exited;
+    this.processHandles.get(terminal.id)?.finish(exitCode);
+    this.processHandles.delete(terminal.id);
     if (!this.terminals.has(terminal.id)) return;
     terminal.status = "exited";
     terminal.exitCode = exitCode;

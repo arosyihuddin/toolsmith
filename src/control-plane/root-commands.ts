@@ -2,6 +2,7 @@ import { accessSync, constants, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { registerManagedProcess } from "../process";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { workspacePrefs } from "./db/schema";
@@ -330,6 +331,17 @@ export async function executeRootCommand(
         env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LANG: "C.UTF-8" },
       },
     );
+    const processHandle = child.pid ? registerManagedProcess({
+      pid: child.pid,
+      source: "sudo",
+      kind: "command",
+      label: "Privileged command",
+      stop: () => new Promise<void>((resolveStop) => {
+        if (child.exitCode !== null) return resolveStop();
+        child.once("close", () => resolveStop());
+        child.kill("SIGTERM");
+      }),
+    }) : undefined;
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -377,8 +389,9 @@ export async function executeRootCommand(
       if (stderr.length < 8000)
         stderr += chunk.toString("utf8").slice(0, 8000 - stderr.length);
     });
-    child.on("error", (error) => finish(error));
+    child.on("error", (error) => { processHandle?.finish(1); finish(error); });
     child.on("close", (code) => {
+      processHandle?.finish(code ?? 1);
       if (aborted) return finish(new Error("Perintah root dibatalkan."));
       if (timedOut)
         return finish(

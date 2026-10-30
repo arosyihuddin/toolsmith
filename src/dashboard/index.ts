@@ -1,4 +1,5 @@
 import { handleTunnelApi } from "../tunnels/manager";
+import { handleProcessesApi } from "./processes-api";
 import { handleWorkspaceApi } from "./workspace-api";
 import { handleEventsApi } from "./events-api";
 import { handleTerminalApi } from "./terminal-api";
@@ -10,6 +11,9 @@ import { handleWorkspaceFilesApi } from "./workspace-files-api";
 
 export async function handleDashboardRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
+
+  const processResponse = await handleProcessesApi(request, url);
+  if (processResponse) return processResponse;
 
   const tunnelResponse = await handleTunnelApi(request, url);
   if (tunnelResponse) return tunnelResponse;

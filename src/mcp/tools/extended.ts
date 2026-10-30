@@ -7,6 +7,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "../../lib/config";
 import { registerExposedTool } from "./register";
 import { errorMessage, errorResult, result } from "./shared";
+import { registerManagedProcess, terminateProcessGroup } from "../../process";
 
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const writeRisk = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
@@ -32,6 +33,7 @@ function run(command: string, args: string[], cwd = base, timeoutMs = 15000, inp
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolvePromise, reject) => {
     if (signal?.aborted) { reject(new Error("Command cancelled before start: " + command)); return; }
     const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env: process.env });
+    const processHandle = child.pid ? registerManagedProcess({ pid: child.pid, source: "eval", kind: "command", label: "Code execution", cwd, stop: () => new Promise<void>((resolveStop) => { if (child.exitCode !== null) return resolveStop(); child.once("close", () => resolveStop()); terminate("SIGTERM"); }) }) : undefined;
     const out: Buffer[] = []; const err: Buffer[] = []; let outSize = 0; let errSize = 0;
     const append = (target: Buffer[], chunk: Buffer, current: number, limit: number) => { const kept = chunk.subarray(0, Math.max(0, limit - current)); if (kept.length) target.push(kept); return current + kept.length; };
     child.stdout.on("data", (chunk: Buffer) => { outSize = append(out, chunk, outSize, 100_000); });
@@ -48,9 +50,11 @@ function run(command: string, args: string[], cwd = base, timeoutMs = 15000, inp
     const timer = setTimeout(() => { timedOut = true; terminate("SIGTERM"); }, timeoutMs);
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
-    child.once("error", (error) => { if (settled) return; settled = true; cleanup(); reject(error); });
-    child.once("close", (code) => {
+    child.once("error", (error) => { if (settled) return; settled = true; cleanup(); processHandle?.finish(1); reject(error); });
+    child.once("close", async (code) => {
       if (settled) return; settled = true; cleanup();
+      if (child.pid && process.platform !== "win32") await terminateProcessGroup(child.pid);
+      processHandle?.finish(code ?? 1);
       if (aborted) reject(new Error("Command cancelled: " + command));
       else if (timedOut) reject(new Error("Command timed out after " + timeoutMs + "ms: " + command));
       else resolvePromise({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });

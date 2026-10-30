@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { registerManagedProcess } from "../process";
 
 export type TunnelState = "starting" | "running" | "stopping" | "stopped" | "error";
 export interface ManagedTunnel {
@@ -11,7 +12,7 @@ export interface ManagedTunnel {
   error?: string;
   logs: string[];
 }
-interface TunnelProcess extends ManagedTunnel { process?: Bun.Subprocess }
+interface TunnelProcess extends ManagedTunnel { process?: Bun.Subprocess; processHandle?: ReturnType<typeof registerManagedProcess> }
 
 const MAX_LOG_LINES = 300;
 const tunnels = new Map<string, TunnelProcess>();
@@ -19,7 +20,7 @@ const eventClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const eventEncoder = new TextEncoder();
 
 function snapshot(record: TunnelProcess): ManagedTunnel {
-  const { process: _process, ...safe } = record;
+  const { process: _process, processHandle: _processHandle, ...safe } = record;
   return { ...safe, logs: [...safe.logs] };
 }
 
@@ -93,6 +94,7 @@ export async function startTunnel(input: unknown): Promise<ManagedTunnel> {
   try {
     const child = Bun.spawn(["cloudflared", "tunnel", "--no-autoupdate", "--url", target], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
     record.process = child;
+    record.processHandle = registerManagedProcess({ pid: child.pid, source: "tunnel", kind: "service", label: "cloudflared tunnel", cwd: process.cwd(), stop: async () => { await stopTunnel(record.id); } });
     publishTunnels();
     const consume = async (stream: ReadableStream<Uint8Array>) => {
       const reader = stream.getReader();
@@ -115,6 +117,8 @@ export async function startTunnel(input: unknown): Promise<ManagedTunnel> {
     void Promise.all([consume(child.stdout), consume(child.stderr)]);
     void child.exited.then((code) => {
       record.process = undefined;
+      record.processHandle?.finish(code);
+      record.processHandle = undefined;
       record.updatedAt = new Date().toISOString();
       if (record.state === "stopping") record.state = "stopped";
       else if (code === 0) record.state = "stopped";
