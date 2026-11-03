@@ -93,6 +93,19 @@ Do not commit tokens, OAuth credentials, sudo passwords, or encryption keys. Cha
 
 ## Tool catalog and policy
 
+### Reset administrator password
+
+If the Toolsmith OAuth administrator password is lost, run this command on the
+same Linux account that owns the Toolsmith installation:
+
+    toolsmith reset-password
+
+The command prompts for the new password without echoing it, requires at least
+12 characters, updates the local administrator credential hash, and revokes
+all existing administrator browser sessions. It does not change the API token
+or existing OAuth access/refresh tokens. No service restart or sudo access is
+required.
+
 GET /api/tools is the source of truth consumed by Toolsmith Console. The catalog includes filesystem/workspace tools, desktop automation, system diagnostics, root-command execution, and tunnel management. Exposure, permissions, custom rules, and approval decisions are enforced by the backend, not by the UI. Root-command allow rules match exact commands and arguments; seeded shutdown/reboot examples remain disabled by default.
 
 A configured working directory is a default cwd, not a filesystem or process sandbox. Treat tool arguments, paths, URLs, browser state, and client metadata as untrusted.

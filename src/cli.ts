@@ -223,6 +223,57 @@ async function update() {
     "Updated and restarted. Existing configuration and data were preserved.",
   );
 }
+
+async function promptHidden(label: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY || !process.stdin.setRawMode) {
+    throw new Error("Password reset requires an interactive terminal.");
+  }
+  return await new Promise<string>((resolvePrompt, rejectPrompt) => {
+    let value = "";
+    let settled = false;
+    const cleanup = () => {
+      process.stdin.off("data", onData);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write("\n");
+    };
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) rejectPrompt(error);
+      else resolvePrompt(value);
+    };
+    const onData = (chunk: Buffer) => {
+      for (const char of chunk.toString("utf8")) {
+        if (char === "\u0003") return finish(new Error("Password reset cancelled."));
+        if (char === "\r" || char === "\n") return finish();
+        if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
+        else if (char >= " " && char !== "\u007f") value += char;
+      }
+    };
+    process.stdout.write(label);
+    process.stdin.setRawMode(true);
+    process.stdin.setEncoding("utf8");
+    process.stdin.resume();
+    process.stdin.on("data", onData);
+  });
+}
+
+async function resetAdminPasswordCommand() {
+  process.env.NODE_ENV = "production";
+  process.env.TOOLSMITH_CONFIG ??= CONFIG_FILE;
+  const { sqlite } = await import("./control-plane/db");
+  const { resetAdminPassword } = await import("./lib/admin-password");
+  const password = await promptHidden("New admin password (min. 12 characters): ");
+  const confirmation = await promptHidden("Confirm new password: ");
+  if (password !== confirmation) throw new Error("Password confirmation does not match.");
+  const username = resetAdminPassword(sqlite, password);
+  print("Administrator password updated for '" + username + "'.");
+  print("All existing administrator browser sessions have been revoked.");
+  print("OAuth access and refresh tokens were not changed.");
+}
+
 async function uninstall(purge: boolean) {
   ensureLinux();
   try {
@@ -249,7 +300,7 @@ async function uninstall(purge: boolean) {
 }
 function help() {
   console.log(
-    "Toolsmith CLI\n\nUsage:\n  toolsmith install [source-directory]\n  toolsmith update\n  toolsmith start\n  toolsmith stop\n  toolsmith restart\n  toolsmith status\n  toolsmith logs\n  toolsmith uninstall [--purge]\n  toolsmith version\n  toolsmith help\n\nInstall uses ~/.toolsmith and a systemd user service; no sudo required.\nUninstall preserves user data. Use --purge to remove everything.",
+    "Toolsmith CLI\n\nUsage:\n  toolsmith install [source-directory]\n  toolsmith update\n  toolsmith start\n  toolsmith stop\n  toolsmith restart\n  toolsmith status\n  toolsmith logs\n  toolsmith reset-password\n  toolsmith uninstall [--purge]\n  toolsmith version\n  toolsmith help\n\nAdmin password reset runs locally in an interactive terminal and revokes existing admin sessions.\nInstall uses ~/.toolsmith and a systemd user service; no sudo required.\nUninstall preserves user data. Use --purge to remove everything.",
   );
 }
 try {
@@ -274,6 +325,9 @@ try {
       break;
     case "logs":
       run("journalctl", ["--user", "-u", SERVICE, "-f"]);
+      break;
+    case "reset-password":
+      await resetAdminPasswordCommand();
       break;
     case "uninstall":
       await uninstall(args.includes("--purge"));
