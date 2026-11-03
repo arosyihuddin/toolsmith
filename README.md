@@ -101,7 +101,7 @@ same Linux account that owns the Toolsmith installation:
     toolsmith reset-password
 
 The command prompts for the new password without echoing it, requires at least
-12 characters, updates the local administrator credential hash, and revokes
+8 characters, updates the local administrator credential hash, and revokes
 all existing administrator browser sessions. It does not change the API token
 or existing OAuth access/refresh tokens. No service restart or sudo access is
 required.
