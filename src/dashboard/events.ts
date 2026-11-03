@@ -3,7 +3,8 @@ export type DashboardEventType =
   | "approval.updated"
   | "approval.cleared"
   | "tool_call.created"
-  | "tool_call.updated";
+  | "tool_call.updated"
+  | "process.updated";
 
 export type DashboardEvent = {
   type: DashboardEventType;

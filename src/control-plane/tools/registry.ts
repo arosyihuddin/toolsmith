@@ -1,7 +1,4 @@
 import { asc } from "drizzle-orm";
-import { nativeRuntime } from "../../omp/native";
-import { config } from "../../lib/config";
-import { getNativeToolAnnotations } from "../../mcp/tools/native-metadata";
 import { db } from "../db";
 import { toolConfigs } from "../db/schema";
 import {
@@ -10,11 +7,7 @@ import {
   type PermissionMode,
   type PermissionSection,
 } from "./permissions";
-import {
-  getToolInputFields,
-  registerToolInputSchema,
-  type InputField,
-} from "./input-schema";
+import { getToolInputFields, type InputField } from "./input-schema";
 
 export type ToolRisk = "low" | "medium" | "high" | "isolated";
 export type ToolCategory =
@@ -23,7 +16,6 @@ export type ToolCategory =
   | "files_search"
   | "code_development"
   | "terminal_execution"
-  | "web_research"
   | "network_tunnels"
   | "agent_workflow";
 
@@ -55,6 +47,42 @@ const staticTools: Omit<
   | "sectionCustomRule"
   | "inputFields"
 >[] = [
+  [
+    "read",
+    "Toolsmith",
+    "low",
+    "Read UTF-8 text files within the configured workspace.",
+  ],
+  [
+    "write",
+    "Toolsmith",
+    "high",
+    "Write UTF-8 text files within the configured workspace.",
+  ],
+  [
+    "edit",
+    "Toolsmith",
+    "high",
+    "Replace a unique text match in a workspace file.",
+  ],
+  [
+    "bash",
+    "Toolsmith",
+    "high",
+    "Run a shell command in the configured workspace, subject to permissions and approval.",
+  ],
+  [
+    "find",
+    "Toolsmith",
+    "low",
+    "Find files and directories within the configured workspace.",
+  ],
+  [
+    "grep",
+    "Toolsmith",
+    "low",
+    "Search file contents within the configured workspace.",
+  ],
   [
     "system_info",
     "System",
@@ -98,65 +126,10 @@ const staticTools: Omit<
     "Get the desktop window that currently has keyboard focus.",
   ],
   [
-    "window_focus",
-    "Computer",
-    "medium",
-    "Focus a desktop window by its window id.",
-  ],
-  [
-    "window_close",
-    "Computer",
-    "medium",
-    "Close a desktop window by its window id.",
-  ],
-  [
-    "window_move",
-    "Computer",
-    "medium",
-    "Move a desktop window to a workspace by its window id.",
-  ],
-  [
     "app_list",
     "Computer",
     "low",
     "List desktop applications available on the operating system. Supports optional search and result limit.",
-  ],
-  [
-    "mouse_move",
-    "Computer",
-    "medium",
-    "Move the mouse pointer to absolute screen coordinates.",
-  ],
-  [
-    "mouse_click",
-    "Computer",
-    "high",
-    "Click the mouse at the current cursor position. Defaults to left click.",
-  ],
-  [
-    "mouse_drag",
-    "Computer",
-    "high",
-    "Drag the left mouse button from one screen coordinate to another.",
-  ],
-  ["mouse_scroll", "Computer", "medium", "Scroll the mouse wheel."],
-  [
-    "keyboard_press",
-    "Computer",
-    "high",
-    "Press and release a keyboard key, or a key combination such as Ctrl+C.",
-  ],
-  [
-    "keyboard_hotkey",
-    "Computer",
-    "high",
-    "Press a keyboard shortcut using the supplied modifier/key sequence.",
-  ],
-  [
-    "keyboard_type",
-    "Computer",
-    "high",
-    "Type literal text into the currently focused application.",
   ],
   [
     "screenshot",
@@ -168,7 +141,7 @@ const staticTools: Omit<
     "tunnel_list",
     "Cloudflare Tunnel",
     "low",
-    "List Cloudflare Quick Tunnels managed by OMP-MCP, including state, target URL, public URL, and recent logs.",
+    "List Cloudflare Quick Tunnels managed by Toolsmith, including state, target URL, public URL, and recent logs.",
   ],
   [
     "tunnel_status",
@@ -180,7 +153,7 @@ const staticTools: Omit<
     "tunnel_start",
     "Cloudflare Tunnel",
     "high",
-    "Start a Cloudflare Quick Tunnel to a local HTTP(S) service. Target must use localhost, 127.0.0.1, or ::1. Requires cloudflared installed on the OMP-MCP host.",
+    "Start a Cloudflare Quick Tunnel to a local HTTP(S) service. Target must use localhost, 127.0.0.1, or ::1. Requires cloudflared installed on the Toolsmith host.",
   ],
   [
     "tunnel_stop",
@@ -192,7 +165,35 @@ const staticTools: Omit<
     "sudo_exec",
     "Root Command",
     "high",
-    "Execute a root command directly. Exact matches to enabled root-command rules bypass approval; other commands follow the OMP-MCP permission policy and required approval, without shell parsing.",
+    "Execute a root command directly. Exact matches to enabled root-command rules bypass approval; other commands follow the Toolsmith permission policy and required approval, without shell parsing.",
+  ],
+  ["glob", "Files", "low", "Find workspace files matching a glob pattern."],
+  [
+    "eval",
+    "Execution",
+    "high",
+    "Execute JavaScript or Python code in a child process.",
+  ],
+  [
+    "context_notes",
+    "Agent Workflow",
+    "medium",
+    "Read and update context notes scoped to the current session.",
+  ],
+  ["wait", "Agent Workflow", "low", "Wait for a bounded duration."],
+  ["todo", "Agent Workflow", "medium", "Manage a session-scoped task list."],
+  [
+    "ast_grep",
+    "Code Development",
+    "low",
+    "Search code using structural AST patterns.",
+  ],
+  ["ast_edit", "Code Development", "high", "Apply AST-based code rewrites."],
+  [
+    "github",
+    "GitHub",
+    "low",
+    "Use GitHub CLI for repository, issue, pull request, and workflow queries.",
   ],
 ].map(([name, group, risk, description]) => ({
   name,
@@ -200,17 +201,6 @@ const staticTools: Omit<
   risk: risk as ToolRisk,
   description,
 }));
-
-function riskFromAnnotations(annotations: {
-  readOnlyHint?: boolean;
-  destructiveHint?: boolean;
-  openWorldHint?: boolean;
-}): ToolRisk {
-  if (annotations.readOnlyHint) return "low";
-  if (annotations.destructiveHint)
-    return annotations.openWorldHint ? "high" : "medium";
-  return "medium";
-}
 
 function categoryForTool(name: string): ToolCategory {
   if (["system_info", "hardware_info", "capabilities"].includes(name))
@@ -222,7 +212,6 @@ function categoryForTool(name: string): ToolCategory {
   if (["edit", "write", "ast_grep", "ast_edit", "lsp", "debug"].includes(name))
     return "code_development";
   if (["bash", "eval"].includes(name)) return "terminal_execution";
-  if (name === "web_search") return "web_research";
   if (name.startsWith("tunnel_")) return "network_tunnels";
   if (name === "sudo_exec") return "terminal_execution";
   return "agent_workflow";
@@ -262,20 +251,6 @@ export async function getToolCatalog(): Promise<ToolCatalogEntry[]> {
   >();
   for (const tool of staticTools)
     catalog.set(tool.name, { ...tool, category: categoryForTool(tool.name) });
-  const nativeTools = await nativeRuntime.list(config.ompDefaultCwd);
-
-  for (const tool of nativeTools) {
-    if (tool.name.startsWith("omp_")) continue;
-    registerToolInputSchema(tool.name, tool.inputSchema);
-    if (catalog.has(tool.name)) continue;
-    catalog.set(tool.name, {
-      name: tool.name,
-      group: "Native OMP",
-      category: categoryForTool(tool.name),
-      risk: riskFromAnnotations(getNativeToolAnnotations(tool.name)),
-      description: tool.description,
-    });
-  }
   const tools = [...catalog.values()];
 
   for (const tool of tools) ensureToolConfig(tool.name);

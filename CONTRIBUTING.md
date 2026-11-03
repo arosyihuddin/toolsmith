@@ -1,4 +1,4 @@
-# Contributing to OMP-MCP
+# Contributing to Toolsmith
 
 ## Before changing code
 
@@ -11,7 +11,7 @@
 
 - Bun 1.4 or later.
 - OMP 18.4.10 or a compatible runtime exposing the APIs this project uses.
-- An authenticated OMP/model environment for runtime integration checks.
+- An authenticated compatible runtime/model environment for runtime integration checks.
 - Linux for the recommended systemd deployment and host operations.
 
 Install and run:
@@ -27,7 +27,7 @@ For a normal start:
 bun run start
 ```
 
-Configure `.env` locally; never commit real secrets. Use `.env.example` as the template.
+For installed deployments, configure ~/.toolsmith/config/config.yml; use config.example.yml as the YAML template. Environment variables may override YAML values. Keep real credentials and secrets out of Git. The root .env is only for local development/legacy workflows.
 
 ## Validation
 
@@ -38,16 +38,16 @@ bun run typecheck
 bun test
 ```
 
-Add or update tests for changes to tool registration, policy evaluation, authentication, API validation, persistence, and lifecycle behavior. Integration checks that require a live OMP runtime, browser extension, sudo configuration, cloudflared, or external OAuth client should be identified explicitly rather than represented as unit-tested.
+Add or update tests for changes to tool registration, policy evaluation, authentication, API validation, persistence, and lifecycle behavior. Integration checks that require a live compatible runtime, browser extension, sudo configuration, cloudflared, or external OAuth client should be identified explicitly rather than represented as unit-tested.
 
 ## Runtime and API conventions
 
 - Register tools through the established tool-registration modules.
-- Keep `GET /api/tools` as the authoritative catalog for OMP Control; do not create a second dashboard-side catalog.
+- Keep `GET /api/tools` as the authoritative catalog for Toolsmith Console; do not create a second dashboard-side catalog.
 - Enforce tool exposure and permissions on the server before execution.
 - Validate and normalize custom rules at the API boundary and preserve compatibility with existing stored rules where intended.
 - Require internal Bearer authentication for protected control APIs.
-- Keep OAuth client authorization distinct from OMP Control browser authentication.
+- Keep OAuth client authorization distinct from Toolsmith Console browser authentication.
 - Preserve MCP Streamable HTTP session behavior, SSE event streams, and terminal WebSocket lifecycle.
 - Avoid exposing secrets or sensitive collaboration links in logs and responses.
 
@@ -56,7 +56,7 @@ Add or update tests for changes to tool registration, policy evaluation, authent
 - Persist durable control-plane state in the SQLite schema using Drizzle.
 - Add a migration for schema changes and ensure it is applied by the existing startup migration flow.
 - Do not rely on manually editing deployed databases.
-- Document any new environment variables in both `.env.example` and `README.md`.
+- Document new configuration keys in config.example.yml and README.md. Keep legacy environment-variable compatibility documented where it remains supported.
 
 ## Host operations and security
 

@@ -25,12 +25,12 @@ async function waitForServer() {
 
 async function createClient() {
   const client = new Client({
-    name: "omp-mcp-test-client",
+    name: "toolsmith-test-client",
     version: "0.1.0",
   });
 
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
-    requestInit: { headers: { authorization: "Bearer test-omp-token" } },
+    requestInit: { headers: { authorization: "Bearer test-toolsmith-token" } },
   });
   await client.connect(transport);
 
@@ -43,15 +43,15 @@ beforeAll(async () => {
     env: {
       ...process.env,
       NODE_ENV: "test",
-      OMP_DEFAULT_CWD: root,
+      TOOLSMITH_DEFAULT_CWD: root,
       MCP_TRANSPORT: "http",
       MCP_HTTP_HOST: "127.0.0.1",
       MCP_HTTP_PORT: String(port),
       MCP_HTTP_PATH: "/mcp",
       MCP_PUBLIC_URL: " ",
-      OMP_OAUTH_USERNAME: "",
-      OMP_OAUTH_PASSWORD: "",
-      OMP_API_TOKEN: "test-omp-token",
+      TOOLSMITH_OAUTH_USERNAME: "",
+      TOOLSMITH_OAUTH_PASSWORD: "",
+      TOOLSMITH_API_TOKEN: "test-toolsmith-token",
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -105,7 +105,7 @@ describe("MCP Streamable HTTP integration", () => {
 
       expect(result.isError).not.toBe(true);
       const content = result.content as Array<{ type: string; text?: string }> | undefined;
-      expect(content?.some((item) => item.type === "text" && item.text?.includes("omp-mcp"))).toBe(true);
+      expect(content?.some((item) => item.type === "text" && item.text?.includes("toolsmith"))).toBe(true);
     } finally {
       await transport.close();
     }

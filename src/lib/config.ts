@@ -1,20 +1,33 @@
-const transport = process.env.MCP_TRANSPORT ?? "http";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { parse } from "yaml";
 
-if (transport !== "stdio" && transport !== "http" && transport !== "both") {
-  throw new Error(
-    `Invalid MCP_TRANSPORT: ${transport}. Expected stdio, http, or both.`,
-  );
+const userRoot = join(homedir(), ".toolsmith");
+const configPath = process.env.TOOLSMITH_CONFIG ?? (process.env.NODE_ENV === "production" ? join(userRoot, "config", "config.yml") : join(process.cwd(), ".toolsmith", "config.yml"));
+type UserConfig = { server?: { host?: string; port?: number; path?: string; transport?: "stdio" | "http" | "both" }; security?: { api_token?: string; sudo_encryption_key?: string }; oauth?: { public_url?: string; username?: string; password?: string }; logging?: { level?: string; directory?: string } };
+function loadUserConfig(): UserConfig {
+  if (!existsSync(configPath)) return {};
+  let value: unknown;
+  try { value = parse(readFileSync(configPath, "utf8")); } catch (error) { throw new Error("Unable to parse Toolsmith config at " + configPath + ": " + String(error)); }
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Toolsmith config at " + configPath + ": expected a YAML mapping.");
+  return value as UserConfig;
 }
-
-export const config = {
-  nodeEnv: process.env.NODE_ENV ?? "development",
-  logLevel: process.env.LOG_LEVEL ?? "info",
-  ompDefaultCwd:
-    process.env.NODE_ENV == "development"
-      ? process.cwd()
-      : "/var/lib/omp-mcp/workspace",
-  transport,
-  httpHost: process.env.MCP_HTTP_HOST ?? "127.0.0.1",
-  httpPort: Number(process.env.MCP_HTTP_PORT ?? "48765"),
-  httpPath: process.env.MCP_HTTP_PATH ?? "/mcp",
-} as const;
+const userConfig = loadUserConfig();
+const setDefault = (key: string, value: unknown) => { if (process.env[key] === undefined && value !== undefined && value !== null) process.env[key] = String(value); };
+setDefault("MCP_TRANSPORT", userConfig.server?.transport);
+setDefault("MCP_HTTP_HOST", userConfig.server?.host);
+setDefault("MCP_HTTP_PORT", userConfig.server?.port);
+setDefault("MCP_HTTP_PATH", userConfig.server?.path);
+setDefault("TOOLSMITH_API_TOKEN", userConfig.security?.api_token);
+setDefault("TOOLSMITH_SUDO_ENCRYPTION_KEY", userConfig.security?.sudo_encryption_key);
+setDefault("MCP_PUBLIC_URL", userConfig.oauth?.public_url);
+setDefault("TOOLSMITH_OAUTH_USERNAME", userConfig.oauth?.username);
+setDefault("TOOLSMITH_OAUTH_PASSWORD", userConfig.oauth?.password);
+setDefault("LOG_LEVEL", userConfig.logging?.level);
+setDefault("TOOLSMITH_LOG_DIR", userConfig.logging?.directory);
+if (existsSync(configPath) && process.env.NODE_ENV === "production") { setDefault("TOOLSMITH_DATA_DIR", join(userRoot, "data")); setDefault("TOOLSMITH_DEFAULT_CWD", join(userRoot, "workspace")); setDefault("TOOLSMITH_TERMINAL_ROOT", join(userRoot, "workspace")); }
+const transport = process.env.MCP_TRANSPORT ?? "http";
+if (transport !== "stdio" && transport !== "http" && transport !== "both") throw new Error("Invalid MCP_TRANSPORT: " + transport + ". Expected stdio, http, or both.");
+export const config = { nodeEnv: process.env.NODE_ENV ?? "development", logLevel: process.env.LOG_LEVEL ?? "info", logDirectory: process.env.TOOLSMITH_LOG_DIR ? resolve(process.env.TOOLSMITH_LOG_DIR) : undefined, defaultCwd: process.env.TOOLSMITH_DEFAULT_CWD ?? process.env.OMP_DEFAULT_CWD ?? (process.env.NODE_ENV === "development" ? process.cwd() : existsSync("/var/lib/omp-mcp/workspace") && !existsSync("/var/lib/toolsmith/workspace") ? "/var/lib/omp-mcp/workspace" : "/var/lib/toolsmith/workspace"), transport, httpHost: process.env.MCP_HTTP_HOST ?? "127.0.0.1", httpPort: Number(process.env.MCP_HTTP_PORT ?? "48765"), httpPath: process.env.MCP_HTTP_PATH ?? "/mcp" } as const;

@@ -20,8 +20,8 @@ const call = async (method: string, path: string, body?: unknown) => {
 };
 
 beforeAll(async () => {
-  process.env.OMP_DATA_DIR = dataDir;
-  process.env.OMP_SUDO_ENCRYPTION_KEY = "test-sudo-encryption-key-for-tests-123456";
+  process.env.TOOLSMITH_DATA_DIR = dataDir;
+  process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY = "test-sudo-encryption-key-for-tests-123456";
   ({ handleDashboardRequest: handle } = await import("../src/dashboard"));
   const created = await call("POST", "/api/workspace/create", { path: sandbox, type: "directory" });
   expect(created.status).toBe(201);

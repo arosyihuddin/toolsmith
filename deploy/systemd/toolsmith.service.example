@@ -1,16 +1,16 @@
 [Unit]
-Description=OMP MCP Server
+Description=Toolsmith MCP Server
 After=network.target
 
 [Service]
 Type=simple
 User=pstar7
 Group=pstar7
-WorkingDirectory=/opt/omp-mcp
-EnvironmentFile=/opt/omp-mcp/.env
+WorkingDirectory=/opt/toolsmith
+EnvironmentFile=/opt/toolsmith/.env
 Environment=HOME=/home/pstar7
 Environment=NODE_ENV=production
-ExecStart=/opt/omp-mcp/bin/bun run dist/index.js
+ExecStart=/opt/toolsmith/bin/bun run dist/index.js
 Restart=always
 RestartSec=5
 

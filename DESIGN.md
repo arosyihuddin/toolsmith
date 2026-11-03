@@ -1,8 +1,8 @@
-# OMP-MCP — Design and Interface Conventions
+# Toolsmith — Design and Interface Conventions
 
 ## Scope
 
-OMP-MCP is a runtime/server project, not the OMP Control dashboard frontend. The full dashboard UI lives in the separate OMP-Control repository. This guide applies to user-facing interfaces that OMP-MCP itself serves or exposes, such as the OAuth authorization/login page, and to the shape and consistency of its API responses.
+Toolsmith is a runtime/server project, not the Toolsmith Console dashboard frontend. The full dashboard UI lives in the separate OMP-Control repository. This guide applies to user-facing interfaces that Toolsmith itself serves or exposes, such as the OAuth authorization/login page, and to the shape and consistency of its API responses.
 
 ## Interface principles
 
@@ -18,7 +18,7 @@ OMP-MCP is a runtime/server project, not the OMP Control dashboard frontend. The
 - Keep form controls, buttons, validation messages, and loading/disabled states consistent.
 - Make the requested client/application and authorization decision understandable before a user grants access.
 - Show failures in a recoverable, concise way without exposing internal stack traces or secrets.
-- Keep authentication state separate from OMP Control browser sessions. OAuth credentials authorize MCP clients; they do not create an OMP Control dashboard session.
+- Keep authentication state separate from Toolsmith Console browser sessions. OAuth credentials authorize MCP clients; they do not create an Toolsmith Console dashboard session.
 
 ## API consistency
 
@@ -39,9 +39,9 @@ OMP-MCP is a runtime/server project, not the OMP Control dashboard frontend. The
 
 ## Ownership
 
-- OMP-MCP owns the runtime tool catalog, tool execution enforcement, custom permission rules, approval state, host operations, terminals, and tunnel lifecycle.
-- OMP-Control consumes OMP-MCP APIs and presents those controls in the dashboard.
-- Shared visual changes to the OMP Control dashboard should be made in the OMP-Control repository and follow its `DESIGN.md`.
+- Toolsmith owns the runtime tool catalog, tool execution enforcement, custom permission rules, approval state, host operations, terminals, and tunnel lifecycle.
+- OMP-Control consumes Toolsmith APIs and presents those controls in the dashboard.
+- Shared visual changes to the Toolsmith Console dashboard should be made in the OMP-Control repository and follow its `DESIGN.md`.
 
 ## Review checklist
 

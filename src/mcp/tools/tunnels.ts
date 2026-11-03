@@ -9,12 +9,12 @@ const mutating = { readOnlyHint: false, destructiveHint: true, idempotentHint: f
 
 export function registerTunnelTools(server: McpServer) {
   registerExposedTool(server, "tunnel_list", {
-    description: "List Cloudflare Quick Tunnels managed by OMP-MCP, including state, target URL, public URL, and recent logs.",
+    description: "List Cloudflare Quick Tunnels managed by Toolsmith, including state, target URL, public URL, and recent logs.",
     inputSchema: {}, annotations: readOnly,
   }, async () => result({ tunnels: listTunnels() }));
 
   registerExposedTool(server, "tunnel_start", {
-    description: "Start a Cloudflare Quick Tunnel to a local HTTP(S) service. Target must use localhost, 127.0.0.1, or ::1. Requires cloudflared installed on the OMP-MCP host.",
+    description: "Start a Cloudflare Quick Tunnel to a local HTTP(S) service. Target must use localhost, 127.0.0.1, or ::1. Requires cloudflared installed on the Toolsmith host.",
     inputSchema: { target: z.string().min(1).max(2048).describe("Local target URL, for example http://127.0.0.1:5173") },
     annotations: mutating,
   }, async ({ target }) => {
