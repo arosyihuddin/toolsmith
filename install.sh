@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 REPOSITORY="https://github.com/arosyihuddin/toolsmith.git"
-BRANCH="main"
+BRANCH="${TOOLSMITH_BRANCH:-main}"
 TMP_ROOT="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_ROOT"; }
 trap cleanup EXIT
@@ -12,7 +12,27 @@ fail() { printf '[toolsmith] error: %s\n' "$*" >&2; exit 1; }
 
 [[ "$(uname -s)" == "Linux" ]] || fail "The one-line installer currently supports Linux only."
 command -v systemctl >/dev/null 2>&1 || fail "systemd is required."
-systemctl --user show-environment >/dev/null 2>&1 || fail "No active systemd user session. Log in to your desktop/user session and retry."
+[[ -d /run/systemd/system ]] || fail "systemd is not running. Toolsmith requires a systemd-based Linux host."
+
+# SSH sessions may not have a systemd user manager. Enable lingering so the
+# manager can run without a desktop or an active login session.
+USER_ID="$(id -u)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$USER_ID}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+  command -v loginctl >/dev/null 2>&1 || fail "loginctl is required to initialize the systemd user manager."
+  command -v sudo >/dev/null 2>&1 || fail "The systemd user manager is unavailable. Ask an administrator to run: loginctl enable-linger '$USER'."
+  info "Systemd user manager is unavailable. Enabling lingering for '$USER'..."
+  sudo loginctl enable-linger "$USER" || fail "Could not enable lingering for '$USER'. Ensure this account has sudo permission, or ask an administrator to run: loginctl enable-linger '$USER'."
+  sudo systemctl start "user@$USER_ID.service" || fail "Could not start the systemd user manager for '$USER'."
+  for attempt in {1..10}; do
+    systemctl --user show-environment >/dev/null 2>&1 && break
+    sleep 1
+  done
+fi
+
+systemctl --user show-environment >/dev/null 2>&1 || fail "The systemd user manager is still unavailable. Check /run/user/$USER_ID/bus and lingering for '$USER'."
 
 case "$(uname -m)" in
   x86_64|aarch64|arm64) ;;

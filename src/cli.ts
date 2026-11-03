@@ -70,14 +70,19 @@ function ensureLinux() {
     throw new Error(
       "User service installation currently supports Linux with systemd.",
     );
-  if (
-    !existsSync("/run/systemd/system") &&
-    !process.env.DBUS_SESSION_BUS_ADDRESS
-  ) {
+  if (!existsSync("/run/systemd/system")) {
     throw new Error(
-      "systemd user session is unavailable. Log in to a systemd session before installing.",
+      "systemd is not running. Toolsmith requires a systemd-based Linux host.",
     );
   }
+  const userManager = spawnSync("systemctl", ["--user", "show-environment"], {
+    stdio: "ignore",
+    env: process.env,
+  });
+  if (userManager.status !== 0)
+    throw new Error(
+      'systemd user manager is unavailable. Run install.sh to initialize it, or enable lingering with: sudo loginctl enable-linger "$USER"',
+    );
 }
 async function findAvailablePort(start = 48765): Promise<number> {
   for (let port = start; port < start + 20; port++) {
