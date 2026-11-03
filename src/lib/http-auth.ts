@@ -1,18 +1,21 @@
 import { timingSafeEqual } from "node:crypto";
 import { verifyOAuthAccessToken } from "./oauth";
+import { resolvePublicOrigin } from "./public-origin";
 
 
 /** Protect HTTP endpoints with the internal Bearer token; MCP also accepts OAuth access tokens. */
 export async function authorizeHttpRequest(request: Request, allowOAuth = false): Promise<Response | null> {
   const resourcePath = process.env.MCP_HTTP_PATH ?? "/mcp";
-  const publicUrl = process.env.MCP_PUBLIC_URL?.trim();
-  const metadataUrl = publicUrl ? new URL("/.well-known/oauth-protected-resource" + resourcePath, publicUrl).href : "";
+  const publicOrigin = resolvePublicOrigin(request);
+  const metadataUrl = publicOrigin
+    ? new URL("/.well-known/oauth-protected-resource" + resourcePath, publicOrigin).href
+    : "";
   const headers = { "cache-control": "no-store", "www-authenticate": metadataUrl ? 'Bearer resource_metadata="' + metadataUrl + '"' : "Bearer" };
   const authorization = request.headers.get("authorization") ?? "";
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   const supplied = match?.[1]?.trim() ?? "";
   if (allowOAuth && supplied) {
-    const verified = await verifyOAuthAccessToken(supplied);
+    const verified = await verifyOAuthAccessToken(supplied, request);
     if (verified && verified.scopes.includes("mcp:tools")) return null;
   }
   const token = (process.env.TOOLSMITH_API_TOKEN ?? process.env.OMP_API_TOKEN)?.trim() ?? "";

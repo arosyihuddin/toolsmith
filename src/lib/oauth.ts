@@ -5,11 +5,13 @@ import { parse, stringify } from "yaml";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { sqlite } from "../control-plane/db";
+import { logger } from "./logger";
+import { resolvePublicOrigin } from "./public-origin";
+import { preservePublicUrl } from "./oauth-config";
 
 const configFile = process.env.TOOLSMITH_CONFIG ?? (process.env.NODE_ENV === "production" ? join(homedir(), ".toolsmith", "config", "config.yml") : join(process.cwd(), ".toolsmith", "config.yml"));
-function oauthConfig() {
-  const publicUrlValue = process.env.MCP_PUBLIC_URL?.trim();
-  const issuer = publicUrlValue ? new URL(publicUrlValue) : null;
+function oauthConfig(request?: Request) {
+  const issuer = resolvePublicOrigin(request);
   const resourceUrl = issuer ? new URL(process.env.MCP_HTTP_PATH ?? "/mcp", issuer) : null;
   return { issuer, resourceUrl };
 }
@@ -18,7 +20,7 @@ const now = () => Math.floor(Date.now() / 1000);
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const randomToken = () => randomBytes(32).toString("base64url");
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store", pragma: "no-cache" } });
-function oauthEnabled() { const { issuer, resourceUrl } = oauthConfig(); return Boolean(issuer && issuer.protocol === "https:" && issuer.pathname === "/" && !issuer.search && !issuer.hash && resourceUrl); }
+function oauthEnabled(request?: Request) { const { issuer, resourceUrl } = oauthConfig(request); return Boolean(issuer && issuer.protocol === "https:" && issuer.pathname === "/" && !issuer.search && !issuer.hash && resourceUrl); }
 
 sqlite.exec(`CREATE TABLE IF NOT EXISTS toolsmith_admin (id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL UNIQUE, salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);`);
 const sessionCookie = "toolsmith_session";
@@ -27,7 +29,7 @@ function passwordHash(password: string, salt: Buffer) { return scryptSync(passwo
 function verifyAdmin(user: string, pass: string) { const row = sqlite.query("SELECT username, salt, password_hash FROM toolsmith_admin WHERE id = 1").get() as any; return Boolean(row && safeEqual(user, row.username) && safeEqual(passwordHash(pass, Buffer.from(row.salt, "hex")), row.password_hash)); }
 function sessionToken(request: Request) { return (request.headers.get("cookie") ?? "").split(";").map(x => x.trim()).find(x => x.startsWith(sessionCookie + "="))?.slice(sessionCookie.length + 1) ?? ""; }
 function hasSession(request: Request) { const token = sessionToken(request); if (!token) return false; sqlite.query("DELETE FROM toolsmith_admin_sessions WHERE expires_at < ?").run(now()); return Boolean(sqlite.query("SELECT token_hash FROM toolsmith_admin_sessions WHERE token_hash = ? AND expires_at > ?").get(hash(token), now())); }
-function cookie(token: string, maxAge: number) { return sessionCookie + "=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + maxAge + (new URL(process.env.MCP_PUBLIC_URL || "http://localhost").protocol === "https:" ? "; Secure" : ""); }
+function cookie(token: string, maxAge: number, request: Request) { return sessionCookie + "=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + maxAge + (oauthConfig(request).issuer?.protocol === "https:" ? "; Secure" : ""); }
 function html(body: string, authenticated = false) {
   const page = `'<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Toolsmith</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%235e6ad2%22%2F%3E%3Ctext x=%2250%25%22 y=%2252%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2240%22 fill=%22white%22%3ET%3C%2Ftext%3E%3C%2Fsvg%3E"><style>
 :root{color-scheme:light;--canvas:#fafafa;--surface:#fff;--raised:#fff;--hover:#f5f5f5;--line:#e5e5e5;--line-strong:#d4d4d4;--fg:#0a0a0a;--muted:#737373;--subtle:#a3a3a3;--accent:#5e6ad2;--accent-hover:#4f5bc4;--danger:#d93f3f;--success:#2d9d6b}
@@ -36,7 +38,7 @@ function html(body: string, authenticated = false) {
 </style><script>try{const t=localStorage.getItem("toolsmith-oauth-theme");document.documentElement.classList.toggle("dark",t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches)}catch{}</script></head><body><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle theme" title="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/></svg></button><div class="frame"><main class="shell${authenticated ? " authenticated" : ""}"><section class="brand"><div class="brand-head"><span class="logo">T</span><span>Toolsmith</span></div><div class="brand-copy"><p class="eyebrow">One workspace. Full control.</p><h2>Your tools,<br>connected.</h2><p>Kelola akses aman ke Toolsmith dan hubungkan client MCP Anda.</p></div><p class="brand-foot">Private workspace</p></section><section class="panel"><div class="content">${body}</div></section></main></div><script>document.addEventListener("click",e=>{const b=e.target.closest(".password-toggle");if(b){const i=b.parentElement.querySelector("input"),v=i.type==="password";i.type=v?"text":"password";b.classList.toggle("password-visible",v);b.setAttribute("aria-label",v?"Sembunyikan password":"Tampilkan password");b.title=v?"Sembunyikan password":"Tampilkan password";return}if(e.target.closest("#theme-toggle")){const r=document.documentElement;r.classList.toggle("dark");try{localStorage.setItem("toolsmith-oauth-theme",r.classList.contains("dark")?"dark":"light")}catch{}}});document.getElementById("reveal-api-token")?.addEventListener("click",async function(){const el=document.getElementById("api-token");if(el.dataset.revealed==="true"){el.textContent="••••••••••••••••••••••••••••••••";el.dataset.revealed="false";this.textContent="Tampilkan";return}this.disabled=true;try{const response=await fetch("/admin/token",{credentials:"same-origin"});document.getElementById("copy-api-token")?.addEventListener("click",async function(){const el=document.getElementById("api-token");let token=el.dataset.revealed==="true"?el.textContent:"";if(!token){this.disabled=true;try{const response=await fetch("/admin/token",{credentials:"same-origin"});const markup=await response.text();const doc=new DOMParser().parseFromString(markup,"text/html");token=doc.querySelector(".token")?.textContent??""}catch{}finally{this.disabled=false}}if(!token||token==="Token tidak ditemukan"){this.textContent="Gagal";return}try{await navigator.clipboard.writeText(token);this.textContent="Tersalin";setTimeout(()=>this.textContent="Copy",1500)}catch{this.textContent="Gagal menyalin"}});const markup=await response.text();const doc=new DOMParser().parseFromString(markup,"text/html");el.textContent=doc.querySelector(".token")?.textContent??"Token tidak ditemukan";el.dataset.revealed="true";this.textContent="Sembunyikan"}catch{el.textContent="Gagal memuat token";el.dataset.revealed="true"}finally{this.disabled=false}});</script></body></html>`;
   return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
-async function writeSecrets(apiToken: string, sudoKey: string, username: string, publicUrl: string) { await mkdir(join(configFile, ".."), { recursive: true, mode: 0o700 }); const raw = existsSync(configFile) ? await readFile(configFile, "utf8") : "server:\n  host: 127.0.0.1\n  port: 48766\n  path: /mcp\n  transport: http\n"; const cfg = (parse(raw) ?? {}) as any; cfg.security = { ...(cfg.security ?? {}), api_token: apiToken, sudo_encryption_key: sudoKey }; cfg.oauth = { ...(cfg.oauth ?? {}), username, password: "", public_url: publicUrl }; const tmp = configFile + ".tmp"; await writeFile(tmp, stringify(cfg), { mode: 0o600 }); await chmod(tmp, 0o600); await writeFile(configFile, await readFile(tmp)); await chmod(configFile, 0o600); await Bun.file(tmp).delete(); process.env.TOOLSMITH_API_TOKEN = apiToken; process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY = sudoKey; process.env.TOOLSMITH_OAUTH_USERNAME = username; process.env.TOOLSMITH_OAUTH_PASSWORD = ""; if (publicUrl) process.env.MCP_PUBLIC_URL = publicUrl; }
+async function writeSecrets(apiToken: string, sudoKey: string, username: string, publicUrl: string) { await mkdir(join(configFile, ".."), { recursive: true, mode: 0o700 }); const raw = existsSync(configFile) ? await readFile(configFile, "utf8") : "server:\n  host: 127.0.0.1\n  port: 48766\n  path: /mcp\n  transport: http\n"; const cfg = (parse(raw) ?? {}) as any; cfg.security = { ...(cfg.security ?? {}), api_token: apiToken, sudo_encryption_key: sudoKey }; const preservedPublicUrl = preservePublicUrl(publicUrl, cfg.oauth?.public_url); cfg.oauth = { ...(cfg.oauth ?? {}), username, password: "", public_url: preservedPublicUrl }; const tmp = configFile + ".tmp"; await writeFile(tmp, stringify(cfg), { mode: 0o600 }); await chmod(tmp, 0o600); await writeFile(configFile, await readFile(tmp)); await chmod(configFile, 0o600); await Bun.file(tmp).delete(); process.env.TOOLSMITH_API_TOKEN = apiToken; process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY = sudoKey; process.env.TOOLSMITH_OAUTH_USERNAME = username; process.env.TOOLSMITH_OAUTH_PASSWORD = ""; if (preservedPublicUrl) process.env.MCP_PUBLIC_URL = preservedPublicUrl; }
 function adminPage(request: Request): Response { if (!adminConfigured()) return html('<h1>Welcome to Toolsmith</h1><p>Initial setup. Buat akun administrator untuk mengamankan server.</p><form method="post" action="/setup"><label>Username</label><input name="username" minlength="3" maxlength="32" required pattern="[A-Za-z0-9._-]+"><label>Password (minimal 8 karakter)</label><div class="password-wrap"><input type="password" name="password" minlength="8" required><button type="button" class="password-toggle" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="m3 3 18 18"/></svg></button></div><label>Konfirmasi password</label><div class="password-wrap"><input type="password" name="confirm" minlength="8" required><button type="button" class="password-toggle" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="m3 3 18 18"/></svg></button></div><label>Public URL (HTTPS, opsional)</label><input type="url" name="public_url" placeholder="https://mcp.example.com"><button>Buat administrator</button></form><p class="muted">Initial setup hanya tersedia melalui localhost.</p>'); if (!hasSession(request)) return html('<h1>Toolsmith</h1><p>Login administrator untuk mengelola akses server.</p><form method="post" action="/admin/login"><label>Username</label><input name="username" autocomplete="username" required><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button>Login</button></form>'); return html('<h1>Toolsmith settings</h1><p>Administrator: ' + escapeHtml(String((sqlite.query("SELECT username FROM toolsmith_admin WHERE id=1").get() as any)?.username ?? "")) + '</p><p>API token: <code id="api-token">••••••••••••••••••••••••••••••••</code> <button type="button" id="reveal-api-token">Tampilkan</button> <button type="button" id="copy-api-token">Copy</button></p><form method="post" action="/admin/token"><button>Generate API token baru</button></form><form method="post" action="/admin/logout"><button>Logout</button></form><p class="muted">API token baru ditampilkan satu kali setelah dibuat.</p>', true); }
 async function adminRequest(request: Request, path: string): Promise<Response | null> {
   if (path === "/" && request.method === "GET") return adminPage(request);
@@ -53,11 +55,11 @@ async function adminRequest(request: Request, path: string): Promise<Response | 
     await writeSecrets(api, sudo, user, publicUrl);
     sqlite.query("INSERT INTO toolsmith_admin (id, username, salt, password_hash, created_at) VALUES (1, ?, ?, ?, ?)").run(user, salt.toString("hex"), passwordHash(pass, salt), now());
     const token = randomBytes(32).toString("base64url"); sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(token), now() + 604800);
-    return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(token, 604800), "cache-control": "no-store" } });
+    return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(token, 604800, request), "cache-control": "no-store" } });
   }
-  if (path === "/admin/login" && request.method === "POST") { const form = new URLSearchParams(await request.text()); if (!verifyAdmin(form.get("username") ?? "", form.get("password") ?? "")) return html('<h1>Login gagal</h1><p class="error">Username atau password salah.</p><a href="/">Coba lagi</a>'); const token = randomBytes(32).toString("base64url"); sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(token), now() + 604800); return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(token, 604800), "cache-control": "no-store" } }); }
+  if (path === "/admin/login" && request.method === "POST") { const form = new URLSearchParams(await request.text()); if (!verifyAdmin(form.get("username") ?? "", form.get("password") ?? "")) return html('<h1>Login gagal</h1><p class="error">Username atau password salah.</p><a href="/">Coba lagi</a>'); const token = randomBytes(32).toString("base64url"); sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(token), now() + 604800); return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(token, 604800, request), "cache-control": "no-store" } }); }
   if (path.startsWith("/admin/") && !hasSession(request)) return json({ error: "Unauthorized" }, 401);
-  if (path === "/admin/logout" && request.method === "POST") { const token = sessionToken(request); if (token) sqlite.query("DELETE FROM toolsmith_admin_sessions WHERE token_hash = ?").run(hash(token)); return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie("", 0), "cache-control": "no-store" } }); }
+  if (path === "/admin/logout" && request.method === "POST") { const token = sessionToken(request); if (token) sqlite.query("DELETE FROM toolsmith_admin_sessions WHERE token_hash = ?").run(hash(token)); return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie("", 0, request), "cache-control": "no-store" } }); }
   if (path === "/admin/token" && request.method === "GET") { const cfg = parse(await readFile(configFile, "utf8")) as any; return html('<h1>API token</h1><p class="token">' + escapeHtml(String(cfg.security?.api_token ?? "Not configured")) + '</p><a href="/">Kembali</a>'); }
   if (path === "/admin/token" && request.method === "POST") { const api = randomBytes(32).toString("hex"); const raw = await readFile(configFile, "utf8"), cfg = (parse(raw) ?? {}) as any; cfg.security = { ...(cfg.security ?? {}), api_token: api }; await writeFile(configFile, stringify(cfg), { mode: 0o600 }); await chmod(configFile, 0o600); process.env.TOOLSMITH_API_TOKEN = api; return html('<h1>API token baru</h1><p class="token">' + api + '</p><p>Simpan token ini sekarang. Nilainya tidak akan ditampilkan lagi.</p><a href="/">Kembali</a>'); }
   return null;
@@ -99,8 +101,8 @@ function loginPage(params: URLSearchParams, error = ""): Response {
   ].join("");
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
-function metadata(path: string): Response {
-  const { issuer, resourceUrl } = oauthConfig();
+function metadata(path: string, request: Request): Response {
+  const { issuer, resourceUrl } = oauthConfig(request);
   if (!issuer || !resourceUrl) return json({ error: "OAuth is not configured." }, 503);
   if (path === "/.well-known/oauth-authorization-server") return json({
     issuer: issuer.origin,
@@ -121,27 +123,68 @@ export function isOAuthEndpoint(path: string): boolean {
 }
 export async function handleOAuthRequest(request: Request): Promise<Response> {
   const url = new URL(request.url), path = url.pathname;
+  if (path.startsWith("/oauth/")) {
+    logger.info({ event: "oauth_http_request", method: request.method, path, origin: request.headers.get("origin"), userAgent: request.headers.get("user-agent"), contentType: request.headers.get("content-type") }, "OAuth HTTP request received");
+  }
   if (path === "/favicon.ico") return new Response(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#5e6ad2"/><text x="32" y="44" text-anchor="middle" font-size="42" fill="white">T</text></svg>`, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } });
   const admin = await adminRequest(request, path);
   if (admin) return admin;
-  if (!oauthEnabled()) return json({ error: "OAuth is not configured. Configure oauth.public_url in config.yml before connecting remote MCP clients." }, 503);
-  const { issuer, resourceUrl } = oauthConfig();
+  if (!oauthEnabled(request)) return json({ error: "OAuth is not configured. Send requests through an HTTPS reverse proxy or configure oauth.public_url as a fallback." }, 503);
+  const { issuer, resourceUrl } = oauthConfig(request);
   sqlite.query("DELETE FROM oauth_codes WHERE expires_at < ?").run(now());
   sqlite.query("DELETE FROM oauth_tokens WHERE expires_at < ?").run(now());
-  if (path.startsWith("/.well-known/")) return metadata(path);
+  if (path.startsWith("/.well-known/")) return metadata(path, request);
 
   if (path === "/oauth/register" && request.method === "POST") {
+    const registrationLog = {
+      event: "oauth_client_registration",
+      method: request.method,
+      path,
+      origin: request.headers.get("origin"),
+      userAgent: request.headers.get("user-agent"),
+      contentType: request.headers.get("content-type"),
+    };
+    logger.info(registrationLog, "OAuth client registration request received");
+
     let body: any;
-    try { body = await request.json(); } catch { return json({ error: "invalid_client_metadata" }, 400); }
-    if (!Array.isArray(body.redirect_uris) || !body.redirect_uris.length || !body.redirect_uris.every((uri: unknown) => typeof uri === "string" && validRedirect(uri))) {
+    try {
+      body = await request.json();
+    } catch (error) {
+      logger.warn({ ...registrationLog, outcome: "invalid_json", error: error instanceof Error ? error.message : String(error), status: 400 }, "OAuth client registration rejected");
+      return json({ error: "invalid_client_metadata" }, 400);
+    }
+
+    const redirectUris = Array.isArray(body?.redirect_uris) ? body.redirect_uris : [];
+    const registrationDetails = {
+      ...registrationLog,
+      clientName: typeof body?.client_name === "string" ? body.client_name.slice(0, 120) : "MCP client",
+      redirectUris,
+      grantTypes: body?.grant_types ?? null,
+      responseTypes: body?.response_types ?? null,
+      tokenEndpointAuthMethod: body?.token_endpoint_auth_method ?? "none",
+    };
+
+    if (!redirectUris.length || !redirectUris.every((uri: unknown) => typeof uri === "string" && validRedirect(uri))) {
+      logger.warn({ ...registrationDetails, outcome: "invalid_redirect_uri", status: 400 }, "OAuth client registration rejected");
       return json({ error: "invalid_redirect_uri", error_description: "Redirect URIs must use HTTPS or localhost HTTP." }, 400);
     }
-    if (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== "none") return json({ error: "invalid_client_metadata" }, 400);
+    if (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== "none") {
+      logger.warn({ ...registrationDetails, outcome: "unsupported_token_endpoint_auth_method", status: 400 }, "OAuth client registration rejected");
+      return json({ error: "invalid_client_metadata" }, 400);
+    }
+
     const id = randomToken(), name = typeof body.client_name === "string" ? body.client_name.slice(0, 120) : "MCP client";
     const grants = Array.isArray(body.grant_types) ? body.grant_types.filter((x: unknown) => ["authorization_code", "refresh_token"].includes(String(x))) : ["authorization_code", "refresh_token"];
     const responses = Array.isArray(body.response_types) ? body.response_types.filter((x: unknown) => x === "code") : ["code"];
-    sqlite.query("INSERT INTO oauth_clients (client_id, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method, created_at) VALUES (?, ?, ?, ?, ?, 'none', ?)").run(id, name, JSON.stringify(body.redirect_uris), JSON.stringify(grants.length ? grants : ["authorization_code"]), JSON.stringify(responses.length ? responses : ["code"]), now());
-    return json(clientResponse(client(id)), 201);
+    try {
+      sqlite.query("INSERT INTO oauth_clients (client_id, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method, created_at) VALUES (?, ?, ?, ?, ?, 'none', ?)").run(id, name, JSON.stringify(redirectUris), JSON.stringify(grants.length ? grants : ["authorization_code"]), JSON.stringify(responses.length ? responses : ["code"]), now());
+      const registeredClient = client(id);
+      logger.info({ ...registrationDetails, outcome: "registered", clientId: id, status: 201 }, "OAuth client registered");
+      return json(clientResponse(registeredClient), 201);
+    } catch (error) {
+      logger.error({ ...registrationDetails, outcome: "database_error", status: 500, error: error instanceof Error ? error.message : String(error) }, "OAuth client registration failed");
+      return json({ error: "server_error" }, 500);
+    }
   }
 
   if (path === "/oauth/authorize" && request.method === "GET") {
@@ -208,9 +251,9 @@ function issueTokens(clientId: string, tokenScopes: string[], resource: string):
   sqlite.query("INSERT INTO oauth_tokens (token_hash, client_id, token_type, scopes, resource, expires_at, created_at) VALUES (?, ?, 'refresh', ?, ?, ?, ?)").run(hash(refresh), clientId, JSON.stringify(tokenScopes), resource, issued + 2592000, issued);
   return json({ access_token: access, token_type: "Bearer", expires_in: 3600, refresh_token: refresh, scope: tokenScopes.join(" ") });
 }
-export async function verifyOAuthAccessToken(token: string): Promise<{ token: string; clientId: string; scopes: string[]; expiresAt: number; resource: string } | null> {
-  const { resourceUrl } = oauthConfig();
-  if (!oauthEnabled() || !resourceUrl) return null;
+export async function verifyOAuthAccessToken(token: string, request: Request): Promise<{ token: string; clientId: string; scopes: string[]; expiresAt: number; resource: string } | null> {
+  const { resourceUrl } = oauthConfig(request);
+  if (!oauthEnabled(request) || !resourceUrl) return null;
   const row = sqlite.query("SELECT * FROM oauth_tokens WHERE token_hash = ? AND token_type = 'access'").get(hash(token)) as any;
   if (!row || row.expires_at < now() || row.resource !== resourceUrl.href) return null;
   return { token, clientId: row.client_id, scopes: JSON.parse(row.scopes), expiresAt: row.expires_at, resource: row.resource };
