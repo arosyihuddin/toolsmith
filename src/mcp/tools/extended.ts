@@ -30,13 +30,13 @@ async function writeState(path: string, value: unknown) {
   await writeFile(path, JSON.stringify(value, null, 2) + "\n", "utf8");
 }
 function run(command: string, args: string[], cwd = base, timeoutMs = 15000, input?: string, signal?: AbortSignal) {
-  return new Promise<{ code: number; stdout: string; stderr: string }>((resolvePromise, reject) => {
+  return new Promise<{ code: number; stdout: string; stderr: string; stdoutTruncated: boolean }>((resolvePromise, reject) => {
     if (signal?.aborted) { reject(new Error("Command cancelled before start: " + command)); return; }
     const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env: process.env });
     const processHandle = child.pid ? registerManagedProcess({ pid: child.pid, source: "eval", kind: "command", label: "Code execution", cwd, stop: () => new Promise<void>((resolveStop) => { if (child.exitCode !== null) return resolveStop(); child.once("close", () => resolveStop()); terminate("SIGTERM"); }) }) : undefined;
-    const out: Buffer[] = []; const err: Buffer[] = []; let outSize = 0; let errSize = 0;
+    const out: Buffer[] = []; const err: Buffer[] = []; let outSize = 0; let errSize = 0; let stdoutTruncated = false;
     const append = (target: Buffer[], chunk: Buffer, current: number, limit: number) => { const kept = chunk.subarray(0, Math.max(0, limit - current)); if (kept.length) target.push(kept); return current + kept.length; };
-    child.stdout.on("data", (chunk: Buffer) => { outSize = append(out, chunk, outSize, 100_000); });
+    child.stdout.on("data", (chunk: Buffer) => { if (outSize + chunk.length > 1_000_000) stdoutTruncated = true; outSize = append(out, chunk, outSize, 1_000_000); });
     child.stderr.on("data", (chunk: Buffer) => { errSize = append(err, chunk, errSize, 20_000); });
     let settled = false; let timedOut = false; let aborted = false;
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -57,7 +57,7 @@ function run(command: string, args: string[], cwd = base, timeoutMs = 15000, inp
       processHandle?.finish(code ?? 1);
       if (aborted) reject(new Error("Command cancelled: " + command));
       else if (timedOut) reject(new Error("Command timed out after " + timeoutMs + "ms: " + command));
-      else resolvePromise({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
+      else resolvePromise({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), stdoutTruncated });
     });
     child.stdin.end(input);
   });
@@ -168,10 +168,23 @@ export function registerExtendedTools(server: McpServer) {
       let output;
       try { output = await run("ast-grep", args, base, 15000, undefined, extra.signal); }
       catch (error) { if (!String(error).includes("ENOENT")) throw error; output = await run("sg", args, base, 15000, undefined, extra.signal); }
-      if (output.code !== 0) return errorResult(output.stderr || output.stdout || "ast-grep failed.");
-      let matches: unknown = output.stdout;
-      try { const parsed = JSON.parse(output.stdout); matches = Array.isArray(parsed) ? parsed.slice(0, max_results) : parsed; } catch {}
-      return result({ pattern, matches, truncated: output.stdout.length >= 100_000 });
+      if (output.stdoutTruncated) {
+        return errorResult("ast-grep output exceeded the 1000000-byte safety limit; narrow the pattern or search path and try again.");
+      }
+      let parsed: unknown;
+      try { parsed = JSON.parse(output.stdout); }
+      catch {
+        return errorResult(output.stderr || output.stdout || `ast-grep returned exit code ${output.code} without valid JSON output.`);
+      }
+      if (!Array.isArray(parsed)) {
+        return errorResult(`ast-grep returned an unexpected JSON response (exit code ${output.code}).`);
+      }
+      // ast-grep may exit with code 1 when there are no matches. A valid JSON
+      // array is authoritative, so preserve [] instead of surfacing stderr warnings.
+      if (output.code !== 0 && parsed.length > 0) {
+        return errorResult(output.stderr || `ast-grep failed with exit code ${output.code}.`);
+      }
+      return result({ pattern, matches: parsed.slice(0, max_results), truncated: false });
     } catch (error) { return errorResult("ast_grep unavailable or failed: " + errorMessage(error)); }
   });
 
