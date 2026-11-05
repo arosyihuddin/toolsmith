@@ -57,9 +57,27 @@ info "Starting per-user installation..."
 bun run "$TMP_ROOT/toolsmith/src/cli.ts" install "$TMP_ROOT/toolsmith"
 
 info "Installation finished."
-if [[ ":${PATH:-}:" == *":$HOME/.local/bin:"* ]]; then
-  printf 'Run: %s\n' "toolsmith status"
+SHELL_NAME="${SHELL##*/}"
+case "$SHELL_NAME" in
+  bash)
+    RELOAD_COMMAND="source ~/.bashrc"
+    ;;
+  zsh)
+    RELOAD_COMMAND="source ~/.zshrc"
+    ;;
+  fish)
+    RELOAD_COMMAND="source ~/.config/fish/config.fish"
+    ;;
+  *)
+    RELOAD_COMMAND=""
+    ;;
+esac
+
+if [[ -n "$RELOAD_COMMAND" ]]; then
+  printf '[toolsmith] To activate PATH in your current session, run:\n'
+  printf '  %s\n' "$RELOAD_COMMAND"
+  printf '[toolsmith] Then run: toolsmith status\n'
 else
-  printf 'Reload your shell, then run: %s\n' "toolsmith status"
-  printf 'Or run it immediately with: %s\n' "$HOME/.local/bin/toolsmith status"
+  printf '[toolsmith] Could not detect your shell (%s). Add ~/.local/bin to PATH, then run: toolsmith status\n' "${SHELL_NAME:-unknown}"
 fi
+printf '[toolsmith] Or run immediately with: %s\n' "$HOME/.local/bin/toolsmith status"

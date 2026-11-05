@@ -174,23 +174,19 @@ async function configureUserPath() {
   const shell = process.env.SHELL?.split("/").pop() ?? "";
   let configFile: string | undefined;
   let entry: string;
-  let reload: string;
 
   switch (shell) {
     case "bash":
       configFile = join(HOME, ".bashrc");
       entry = 'export PATH="$HOME/.local/bin:$PATH"';
-      reload = "source ~/.bashrc";
       break;
     case "zsh":
       configFile = join(HOME, ".zshrc");
       entry = 'export PATH="$HOME/.local/bin:$PATH"';
-      reload = "source ~/.zshrc";
       break;
     case "fish":
       configFile = join(HOME, ".config/fish/config.fish");
       entry = 'fish_add_path "$HOME/.local/bin"';
-      reload = "source ~/.config/fish/config.fish";
       break;
     default:
       print(`Could not detect a supported shell (${shell || "unknown"}). Add $HOME/.local/bin to PATH manually.`);
@@ -206,7 +202,6 @@ async function configureUserPath() {
     print(`PATH is already configured in ${configFile.replace(HOME, "~")}.`);
   }
   process.env.PATH = `${USER_BIN}:${process.env.PATH ?? ""}`;
-  print(`Reload your shell configuration now: ${reload}`);
 }
 async function writeUnit() {
   await mkdir(UNIT_DIR, { recursive: true });
