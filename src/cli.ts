@@ -4,6 +4,7 @@ import {
   cp,
   mkdir,
   readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -148,8 +149,18 @@ async function installSource(sourceDir: string) {
 async function installLauncher() {
   await mkdir(BIN, { recursive: true });
   await mkdir(USER_BIN, { recursive: true });
-  if (resolve(process.execPath) !== resolve(BUN_BIN))
-    await copyFile(process.execPath, BUN_BIN);
+  if (resolve(process.execPath) !== resolve(BUN_BIN)) {
+    // Replace atomically: the existing Bun binary may still be running the
+    // Toolsmith systemd service, so never truncate it in place.
+    const temporaryBun = `${BUN_BIN}.tmp-${process.pid}`;
+    try {
+      await copyFile(process.execPath, temporaryBun);
+      await chmod(temporaryBun, 0o755);
+      await rename(temporaryBun, BUN_BIN);
+    } finally {
+      await rm(temporaryBun, { force: true });
+    }
+  }
   await chmod(BUN_BIN, 0o755);
   const launcher =
     '#!/bin/sh\nexec "$HOME/.toolsmith/bin/bun" "$HOME/.toolsmith/app/src/cli.ts" "$@"\n';
