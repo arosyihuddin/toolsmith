@@ -158,6 +158,45 @@ async function installLauncher() {
   await rm(join(USER_BIN, "toolsmith"), { force: true });
   await symlink(LAUNCHER, join(USER_BIN, "toolsmith"));
 }
+
+async function configureUserPath() {
+  const shell = process.env.SHELL?.split("/").pop() ?? "";
+  let configFile: string | undefined;
+  let entry: string;
+  let reload: string;
+
+  switch (shell) {
+    case "bash":
+      configFile = join(HOME, ".bashrc");
+      entry = 'export PATH="$HOME/.local/bin:$PATH"';
+      reload = "source ~/.bashrc";
+      break;
+    case "zsh":
+      configFile = join(HOME, ".zshrc");
+      entry = 'export PATH="$HOME/.local/bin:$PATH"';
+      reload = "source ~/.zshrc";
+      break;
+    case "fish":
+      configFile = join(HOME, ".config/fish/config.fish");
+      entry = 'fish_add_path "$HOME/.local/bin"';
+      reload = "source ~/.config/fish/config.fish";
+      break;
+    default:
+      print(`Could not detect a supported shell (${shell || "unknown"}). Add $HOME/.local/bin to PATH manually.`);
+      return;
+  }
+
+  await mkdir(join(configFile, ".."), { recursive: true });
+  const current = existsSync(configFile) ? await readFile(configFile, "utf8") : "";
+  if (!current.includes(entry)) {
+    await writeFile(configFile, `${current}${current.endsWith("\n") || !current ? "" : "\n"}${entry}\n`);
+    print(`Added ~/.local/bin to PATH in ${configFile.replace(HOME, "~")}.`);
+  } else {
+    print(`PATH is already configured in ${configFile.replace(HOME, "~")}.`);
+  }
+  process.env.PATH = `${USER_BIN}:${process.env.PATH ?? ""}`;
+  print(`Reload your shell configuration now: ${reload}`);
+}
 async function writeUnit() {
   await mkdir(UNIT_DIR, { recursive: true });
   const unit =
@@ -181,6 +220,7 @@ async function bootstrap(sourceDir?: string) {
   for (const dir of [ROOT, BIN, DATA, WORKSPACE, LOGS, CONFIG])
     await mkdir(dir, { recursive: true });
   await installLauncher();
+  await configureUserPath();
   const source = sourceDir ? resolve(sourceDir) : process.cwd();
   const isToolsmithSource =
     existsSync(join(source, "src/index.ts")) &&
@@ -205,8 +245,6 @@ async function bootstrap(sourceDir?: string) {
   print("MCP endpoint: http://" + host + ":" + port + "/mcp");
   print("Configuration: " + CONFIG_FILE);
   print("Data: " + DATA);
-  if (!process.env.PATH?.split(":").includes(USER_BIN))
-    print('Add to PATH: export PATH="$HOME/.local/bin:$PATH"');
 }
 async function update() {
   ensureLinux();

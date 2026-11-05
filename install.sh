@@ -57,4 +57,9 @@ info "Starting per-user installation..."
 bun run "$TMP_ROOT/toolsmith/src/cli.ts" install "$TMP_ROOT/toolsmith"
 
 info "Installation finished."
-printf 'Run: %s\n' "toolsmith status"
+if [[ ":${PATH:-}:" == *":$HOME/.local/bin:"* ]]; then
+  printf 'Run: %s\n' "toolsmith status"
+else
+  printf 'Reload your shell, then run: %s\n' "toolsmith status"
+  printf 'Or run it immediately with: %s\n' "$HOME/.local/bin/toolsmith status"
+fi
