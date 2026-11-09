@@ -25,6 +25,18 @@ describe("administrator request security helpers", () => {
     expect(isSameOriginRequest(request)).toBe(true);
     expect(isSecureRequest(request)).toBe(true);
   });
+  test("matches direct Tailscale access even when reverse-proxy headers are present", () => {
+    const request = new Request("http://100.100.199.119:48766/admin/login", {
+      method: "POST",
+      headers: {
+        host: "100.100.199.119:48766",
+        "x-forwarded-host": "toolsmith.example.com",
+        "x-forwarded-proto": "https",
+        origin: "http://100.100.199.119:48766",
+      },
+    });
+    expect(isSameOriginRequest(request)).toBe(true);
+  });
 
   test("rejects missing and cross-origin browser request metadata", () => {
     expect(isSameOriginRequest(new Request("https://toolsmith.example.com/admin/token", { method: "POST" }))).toBe(false);

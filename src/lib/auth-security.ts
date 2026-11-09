@@ -32,7 +32,18 @@ export function isSameOriginRequest(request: Request): boolean {
   const supplied = request.headers.get("origin") ?? request.headers.get("referer");
   if (!supplied) return false;
   try {
-    return new URL(supplied).origin === requestOrigin(request);
+    const suppliedOrigin = new URL(supplied).origin;
+    const acceptedOrigins = new Set([requestOrigin(request)]);
+
+    // A direct client (for example, a Tailscale IP) may bypass the reverse
+    // proxy while stale forwarded headers are still present on the request.
+    // Keep the actual Host/request URL origin valid alongside the proxy origin.
+    const directOrigin = new URL(request.url);
+    const host = request.headers.get("host")?.trim();
+    if (host) directOrigin.host = host;
+    acceptedOrigins.add(directOrigin.origin);
+
+    return acceptedOrigins.has(suppliedOrigin);
   } catch {
     return false;
   }
