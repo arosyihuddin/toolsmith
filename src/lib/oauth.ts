@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { sqlite } from "../control-plane/db";
 import { logger } from "./logger";
-import { isSameOriginRequest, isSecureRequest, readCookie } from "./auth-security";
+import { isSameOriginRequest, isSecureRequest, readCookie, requestOrigin } from "./auth-security";
 import { resolvePublicOrigin } from "./public-origin";
 import { preservePublicUrl } from "./oauth-config";
 
@@ -84,6 +84,18 @@ async function adminRequest(request: Request, path: string): Promise<Response | 
   const browserPost = request.method === "POST" &&
     (path === "/setup" || path === "/admin/login" || path.startsWith("/admin/"));
   if (browserPost && !isSameOriginRequest(request)) {
+    logger.warn({
+      event: "admin_csrf_rejected",
+      method: request.method,
+      path,
+      requestUrl: request.url,
+      origin: request.headers.get("origin"),
+      referer: request.headers.get("referer"),
+      host: request.headers.get("host"),
+      forwardedHost: request.headers.get("x-forwarded-host"),
+      forwardedProto: request.headers.get("x-forwarded-proto"),
+      resolvedOrigin: requestOrigin(request),
+    }, "Admin request rejected by same-origin protection");
     return json({ error: "Cross-origin request rejected" }, 403);
   }
 
