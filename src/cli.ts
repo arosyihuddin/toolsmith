@@ -115,6 +115,7 @@ async function writeConfig() {
     security: {
       api_token: legacy.TOOLSMITH_API_TOKEN || legacy.OMP_API_TOKEN || randomBytes(32).toString("hex"),
       sudo_encryption_key: legacy.TOOLSMITH_SUDO_ENCRYPTION_KEY || legacy.OMP_SUDO_ENCRYPTION_KEY || randomBytes(32).toString("hex"),
+      setup_token: randomBytes(32).toString("base64url"),
     },
     oauth: {
       public_url: legacy.MCP_PUBLIC_URL || "",
@@ -212,6 +213,8 @@ async function writeUnit() {
     CONFIG_FILE +
     "\nEnvironment=HOME=" +
     HOME +
+    "\nEnvironment=TOOLSMITH_DATA_DIR=" +
+    DATA +
     "\nEnvironment=NODE_ENV=production\nEnvironment=PATH=" +
     BIN +
     ":/usr/local/bin:/usr/bin:/bin\nExecStart=" +
@@ -251,6 +254,12 @@ async function bootstrap(sourceDir?: string) {
   print("MCP endpoint: http://" + host + ":" + port + "/mcp");
   print("Configuration: " + CONFIG_FILE);
   print("Data: " + DATA);
+  const setupConfig = parse(await readFile(CONFIG_FILE, "utf8")) as { security?: { setup_token?: string } };
+  const setupHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
+  if (setupConfig.security?.setup_token) {
+    print("Initial admin setup URL: http://" + setupHost + ":" + port + "/");
+    print("Initial setup token (keep it private): " + setupConfig.security.setup_token);
+  }
 }
 async function update() {
   ensureLinux();
@@ -317,7 +326,35 @@ async function resetAdminPasswordCommand() {
   print("All existing administrator browser sessions have been revoked.");
   print("OAuth access and refresh tokens were not changed.");
 }
-
+async function setupTokenCommand() {
+  process.env.NODE_ENV = "production";
+  process.env.TOOLSMITH_DATA_DIR ??= DATA;
+  if (!existsSync(CONFIG_FILE)) throw new Error("Toolsmith is not installed. Run: toolsmith install");
+  // Load the production database only after its environment and config path are set.
+  const { sqlite } = await import("./control-plane/db");
+  if (sqlite.query("SELECT id FROM toolsmith_admin WHERE id = 1").get()) {
+    throw new Error("Initial setup is already completed. Setup token cannot be generated.");
+  }
+  const raw = await readFile(CONFIG_FILE, "utf8");
+  const parsed = parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Toolsmith config is invalid.");
+  }
+  const config = parsed as Record<string, unknown>;
+  const securityValue = config.security;
+  const security =
+    securityValue && typeof securityValue === "object" && !Array.isArray(securityValue)
+      ? (securityValue as Record<string, unknown>)
+      : {};
+  security.setup_token = randomBytes(32).toString("base64url");
+  config.security = security;
+  const temp = CONFIG_FILE + ".tmp";
+  await writeFile(temp, stringify(config), { mode: 0o600 });
+  await chmod(temp, 0o600);
+  await rename(temp, CONFIG_FILE);
+  await chmod(CONFIG_FILE, 0o600);
+  print("Initial setup token (keep it private): " + String(security.setup_token));
+}
 async function uninstall(purge: boolean) {
   ensureLinux();
   try {
@@ -344,7 +381,7 @@ async function uninstall(purge: boolean) {
 }
 function help() {
   console.log(
-    "Toolsmith CLI\n\nUsage:\n  toolsmith install [source-directory]\n  toolsmith update\n  toolsmith start\n  toolsmith stop\n  toolsmith restart\n  toolsmith status\n  toolsmith logs\n  toolsmith reset-password\n  toolsmith uninstall [--purge]\n  toolsmith version\n  toolsmith help\n\nAdmin password reset runs locally in an interactive terminal and revokes existing admin sessions.\nInstall uses ~/.toolsmith and a systemd user service; no sudo required.\nUninstall preserves user data. Use --purge to remove everything.",
+    "Toolsmith CLI\n\nUsage:\n  toolsmith install [source-directory]\n  toolsmith update\n  toolsmith start\n  toolsmith stop\n  toolsmith restart\n  toolsmith status\n  toolsmith logs\n  toolsmith setup-token\n  toolsmith reset-password\n  toolsmith uninstall [--purge]\n  toolsmith version\n  toolsmith help\n\nThe setup-token command generates a one-time token when initial setup needs to be completed.\nAdmin password reset runs locally in an interactive terminal and revokes existing admin sessions.\nInstall uses ~/.toolsmith and a systemd user service; no sudo required.",
   );
 }
 try {
@@ -369,6 +406,9 @@ try {
       break;
     case "logs":
       run("journalctl", ["--user", "-u", SERVICE, "-f"]);
+      break;
+    case "setup-token":
+      await setupTokenCommand();
       break;
     case "reset-password":
       await resetAdminPasswordCommand();

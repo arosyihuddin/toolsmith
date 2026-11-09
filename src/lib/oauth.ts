@@ -1,11 +1,12 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { parse, stringify } from "yaml";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { sqlite } from "../control-plane/db";
 import { logger } from "./logger";
+import { isSameOriginRequest, isSecureRequest, readCookie } from "./auth-security";
 import { resolvePublicOrigin } from "./public-origin";
 import { preservePublicUrl } from "./oauth-config";
 
@@ -19,49 +20,139 @@ const scopes = ["mcp:tools"];
 const now = () => Math.floor(Date.now() / 1000);
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const randomToken = () => randomBytes(32).toString("base64url");
-const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store", pragma: "no-cache" } });
+const securityHeaders = { "x-content-type-options": "nosniff", "x-frame-options": "DENY", "referrer-policy": "no-referrer", "permissions-policy": "camera=(), microphone=(), geolocation=()" };
+const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(data, { status, headers: { ...securityHeaders, "cache-control": "no-store", pragma: "no-cache", ...headers } });
 function oauthEnabled(request?: Request) { const { issuer, resourceUrl } = oauthConfig(request); return Boolean(issuer && issuer.protocol === "https:" && issuer.pathname === "/" && !issuer.search && !issuer.hash && resourceUrl); }
 
-sqlite.exec(`CREATE TABLE IF NOT EXISTS toolsmith_admin (id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL UNIQUE, salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);`);
+sqlite.exec(`CREATE TABLE IF NOT EXISTS toolsmith_admin (id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL UNIQUE, salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_login_attempts (subject_hash TEXT PRIMARY KEY, attempts INTEGER NOT NULL, window_started_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL DEFAULT 0);`);
 const sessionCookie = "toolsmith_session";
 function adminConfigured() { return Boolean(sqlite.query("SELECT id FROM toolsmith_admin WHERE id = 1").get()); }
 function passwordHash(password: string, salt: Buffer) { return scryptSync(password, salt, 64).toString("hex"); }
-function verifyAdmin(user: string, pass: string) { const row = sqlite.query("SELECT username, salt, password_hash FROM toolsmith_admin WHERE id = 1").get() as any; return Boolean(row && safeEqual(user, row.username) && safeEqual(passwordHash(pass, Buffer.from(row.salt, "hex")), row.password_hash)); }
-function sessionToken(request: Request) { return (request.headers.get("cookie") ?? "").split(";").map(x => x.trim()).find(x => x.startsWith(sessionCookie + "="))?.slice(sessionCookie.length + 1) ?? ""; }
-function hasSession(request: Request) { const token = sessionToken(request); if (!token) return false; sqlite.query("DELETE FROM toolsmith_admin_sessions WHERE expires_at < ?").run(now()); return Boolean(sqlite.query("SELECT token_hash FROM toolsmith_admin_sessions WHERE token_hash = ? AND expires_at > ?").get(hash(token), now())); }
-function cookie(token: string, maxAge: number, request: Request) { return sessionCookie + "=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + maxAge + (oauthConfig(request).issuer?.protocol === "https:" ? "; Secure" : ""); }
+function verifyAdmin(user: string, pass: string) {
+  const row = sqlite.query("SELECT username, salt, password_hash FROM toolsmith_admin WHERE id = 1").get() as any;
+  if (!row) return false;
+  const salt = Buffer.from(row.salt, "hex");
+  const candidate = passwordHash(pass, salt);
+  return safeEqual(user, row.username) && safeEqual(candidate, row.password_hash);
+}
+function sessionToken(request: Request) { return readCookie(request, sessionCookie); }
+function hasSession(request: Request) { const token = sessionToken(request); if (!token) return false; sqlite.query("DELETE FROM toolsmith_admin_sessions WHERE expires_at <= ?").run(now()); return Boolean(sqlite.query("SELECT token_hash FROM toolsmith_admin_sessions WHERE token_hash = ? AND expires_at > ?").get(hash(token), now())); }
+function cookie(token: string, maxAge: number, request: Request) { return sessionCookie + "=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + maxAge + (isSecureRequest(request) ? "; Secure" : ""); }
+const LOGIN_WINDOW_SECONDS = 15 * 60;
+const LOGIN_MAX_ATTEMPTS = 5;
+function loginSubject(request: Request, username: string) {
+  const ip = request.headers.get("cf-connecting-ip")?.trim() || "unknown";
+  return hash(username.trim().toLowerCase() + "|" + ip);
+}
+function isLoginBlocked(request: Request, username: string): boolean {
+  const subject = loginSubject(request, username), timestamp = now();
+  sqlite.query("DELETE FROM toolsmith_admin_login_attempts WHERE window_started_at <= ? AND blocked_until <= ?").run(timestamp - LOGIN_WINDOW_SECONDS, timestamp);
+  const row = sqlite.query("SELECT attempts, window_started_at, blocked_until FROM toolsmith_admin_login_attempts WHERE subject_hash = ?").get(subject) as { attempts: number; window_started_at: number; blocked_until: number } | null;
+  if (!row) return false;
+  if (row.blocked_until > timestamp) return true;
+  if (timestamp - row.window_started_at >= LOGIN_WINDOW_SECONDS) {
+    sqlite.query("DELETE FROM toolsmith_admin_login_attempts WHERE subject_hash = ?").run(subject);
+    return false;
+  }
+  return false;
+}
+function recordLoginFailure(request: Request, username: string) {
+  const subject = loginSubject(request, username), timestamp = now();
+  const row = sqlite.query("SELECT attempts, window_started_at FROM toolsmith_admin_login_attempts WHERE subject_hash = ?").get(subject) as { attempts: number; window_started_at: number } | null;
+  const attempts = row && timestamp - row.window_started_at < LOGIN_WINDOW_SECONDS ? row.attempts + 1 : 1;
+  const started = row && timestamp - row.window_started_at < LOGIN_WINDOW_SECONDS ? row.window_started_at : timestamp;
+  const blockedUntil = attempts >= LOGIN_MAX_ATTEMPTS ? timestamp + LOGIN_WINDOW_SECONDS : 0;
+  sqlite.query("INSERT INTO toolsmith_admin_login_attempts (subject_hash, attempts, window_started_at, blocked_until) VALUES (?, ?, ?, ?) ON CONFLICT(subject_hash) DO UPDATE SET attempts = excluded.attempts, window_started_at = excluded.window_started_at, blocked_until = excluded.blocked_until").run(subject, attempts, started, blockedUntil);
+}
+function clearLoginFailures(request: Request, username: string) {
+  sqlite.query("DELETE FROM toolsmith_admin_login_attempts WHERE subject_hash = ?").run(loginSubject(request, username));
+}
 function html(body: string, authenticated = false) {
   const page = `'<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Toolsmith</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%235e6ad2%22%2F%3E%3Ctext x=%2250%25%22 y=%2252%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2240%22 fill=%22white%22%3ET%3C%2Ftext%3E%3C%2Fsvg%3E"><style>
 :root{color-scheme:light;--canvas:#fafafa;--surface:#fff;--raised:#fff;--hover:#f5f5f5;--line:#e5e5e5;--line-strong:#d4d4d4;--fg:#0a0a0a;--muted:#737373;--subtle:#a3a3a3;--accent:#5e6ad2;--accent-hover:#4f5bc4;--danger:#d93f3f;--success:#2d9d6b}
 .dark{color-scheme:dark;--canvas:#0a0a0a;--surface:#0a0a0a;--raised:#171717;--hover:#262626;--line:#262626;--line-strong:#404040;--fg:#fafafa;--muted:#a3a3a3;--subtle:#737373;--accent:#7c86e8;--accent-hover:#5e6ad2;--danger:#eb5757;--success:#4cb782}
 *{box-sizing:border-box}html{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}body{min-height:100vh;margin:0;background:var(--canvas);color:var(--fg);font-size:14px}.frame{min-height:100vh;padding:clamp(12px,3vw,32px);display:flex}.shell{width:100%;max-width:1200px;min-height:calc(100vh - clamp(24px,6vw,64px));margin:auto;display:grid;grid-template-columns:1fr 1fr;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface)}.brand{display:flex;flex-direction:column;justify-content:space-between;padding:clamp(32px,5vw,56px);border-right:1px solid var(--line);background:var(--raised)}.shell.authenticated .brand{display:none}.shell.authenticated{grid-template-columns:minmax(0,1fr)}.shell.authenticated .panel{min-height:440px;display:flex;align-items:center;justify-content:center;padding:clamp(28px,6vw,64px)}.shell.authenticated .content{width:100%;max-width:480px}.brand-head{display:flex;align-items:center;gap:12px;font-weight:600}.logo{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;font-weight:600}.brand-copy{max-width:440px;margin:48px 0}.eyebrow{margin:0 0 16px;color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}.brand h2{margin:0;font-size:clamp(38px,4vw,52px);line-height:1.1;letter-spacing:-.045em}.brand-copy>p:last-of-type{max-width:360px;margin-top:20px;color:var(--muted);line-height:1.7}.brand-foot{color:var(--subtle);font-size:12px}.panel{display:flex;align-items:center;justify-content:center;min-width:0;padding:clamp(28px,5vw,64px)}.content{width:100%;max-width:360px}.content h1{margin:0 0 8px;font-size:24px;letter-spacing:-.03em}.content p{color:var(--muted);line-height:1.65}.content label{display:block;margin:20px 0 8px;font-weight:500;color:var(--fg)}.content input{width:100%;min-width:0;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);outline:none;transition:border-color .15s,box-shadow .15s}.content input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)}.content button{width:100%;margin-top:20px;padding:12px 16px;border:0;border-radius:8px;background:var(--accent);color:white;font:inherit;font-weight:500;cursor:pointer;transition:background .15s,opacity .15s}.content button:hover{background:var(--accent-hover)}.content button:disabled{opacity:.55;cursor:wait}.content a{color:var(--accent);text-decoration:none}.content a:hover{text-decoration:underline}.muted{font-size:13px;color:var(--subtle)!important}.error{color:var(--danger)!important}.token{overflow-wrap:anywhere;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--raised);font-family:ui-monospace,monospace}.password-wrap{position:relative}.password-wrap input{padding-right:48px}.password-toggle{position:absolute;top:50%;right:4px;transform:translateY(-50%);width:36px!important;height:36px;margin:0!important;padding:0!important;border:0!important;border-radius:6px!important;background:transparent!important;color:var(--muted)!important;display:grid;place-items:center}.password-toggle:hover{background:var(--hover)!important;color:var(--fg)!important}.password-toggle svg{width:18px;height:18px}.password-toggle .slash{display:block}.password-toggle.password-visible .slash{display:none}.theme-toggle{position:fixed;z-index:5;top:20px;right:20px;width:38px!important;height:38px;margin:0!important;padding:0!important;border:1px solid var(--line)!important;border-radius:9px!important;background:var(--surface)!important;color:var(--fg)!important;display:grid;place-items:center}.theme-toggle:hover{background:var(--hover)!important}.theme-toggle svg{width:17px;height:17px}@media(max-width:760px){.shell{max-width:480px;min-height:calc(100vh - 24px);grid-template-columns:1fr}.brand{display:none}.panel{padding:76px 28px 36px}.theme-toggle{top:16px;right:16px}}
 </style><script>try{const t=localStorage.getItem("toolsmith-oauth-theme");document.documentElement.classList.toggle("dark",t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches)}catch{}</script></head><body><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle theme" title="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/></svg></button><div class="frame"><main class="shell${authenticated ? " authenticated" : ""}"><section class="brand"><div class="brand-head"><span class="logo">T</span><span>Toolsmith</span></div><div class="brand-copy"><p class="eyebrow">One workspace. Full control.</p><h2>Your tools,<br>connected.</h2><p>Kelola akses aman ke Toolsmith dan hubungkan client MCP Anda.</p></div><p class="brand-foot">Private workspace</p></section><section class="panel"><div class="content">${body}</div></section></main></div><script>document.addEventListener("click",e=>{const b=e.target.closest(".password-toggle");if(b){const i=b.parentElement.querySelector("input"),v=i.type==="password";i.type=v?"text":"password";b.classList.toggle("password-visible",v);b.setAttribute("aria-label",v?"Sembunyikan password":"Tampilkan password");b.title=v?"Sembunyikan password":"Tampilkan password";return}if(e.target.closest("#theme-toggle")){const r=document.documentElement;r.classList.toggle("dark");try{localStorage.setItem("toolsmith-oauth-theme",r.classList.contains("dark")?"dark":"light")}catch{}}});document.getElementById("reveal-api-token")?.addEventListener("click",async function(){const el=document.getElementById("api-token");if(el.dataset.revealed==="true"){el.textContent="••••••••••••••••••••••••••••••••";el.dataset.revealed="false";this.textContent="Tampilkan";return}this.disabled=true;try{const response=await fetch("/admin/token",{credentials:"same-origin"});document.getElementById("copy-api-token")?.addEventListener("click",async function(){const el=document.getElementById("api-token");let token=el.dataset.revealed==="true"?el.textContent:"";if(!token){this.disabled=true;try{const response=await fetch("/admin/token",{credentials:"same-origin"});const markup=await response.text();const doc=new DOMParser().parseFromString(markup,"text/html");token=doc.querySelector(".token")?.textContent??""}catch{}finally{this.disabled=false}}if(!token||token==="Token tidak ditemukan"){this.textContent="Gagal";return}try{await navigator.clipboard.writeText(token);this.textContent="Tersalin";setTimeout(()=>this.textContent="Copy",1500)}catch{this.textContent="Gagal menyalin"}});const markup=await response.text();const doc=new DOMParser().parseFromString(markup,"text/html");el.textContent=doc.querySelector(".token")?.textContent??"Token tidak ditemukan";el.dataset.revealed="true";this.textContent="Sembunyikan"}catch{el.textContent="Gagal memuat token";el.dataset.revealed="true"}finally{this.disabled=false}});</script></body></html>`;
-  return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  return new Response(page, { headers: { ...securityHeaders, "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
-async function writeSecrets(apiToken: string, sudoKey: string, username: string, publicUrl: string) { await mkdir(join(configFile, ".."), { recursive: true, mode: 0o700 }); const raw = existsSync(configFile) ? await readFile(configFile, "utf8") : "server:\n  host: 127.0.0.1\n  port: 48766\n  path: /mcp\n  transport: http\n"; const cfg = (parse(raw) ?? {}) as any; cfg.security = { ...(cfg.security ?? {}), api_token: apiToken, sudo_encryption_key: sudoKey }; const preservedPublicUrl = preservePublicUrl(publicUrl, cfg.oauth?.public_url); cfg.oauth = { ...(cfg.oauth ?? {}), username, password: "", public_url: preservedPublicUrl }; const tmp = configFile + ".tmp"; await writeFile(tmp, stringify(cfg), { mode: 0o600 }); await chmod(tmp, 0o600); await writeFile(configFile, await readFile(tmp)); await chmod(configFile, 0o600); await Bun.file(tmp).delete(); process.env.TOOLSMITH_API_TOKEN = apiToken; process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY = sudoKey; process.env.TOOLSMITH_OAUTH_USERNAME = username; process.env.TOOLSMITH_OAUTH_PASSWORD = ""; if (preservedPublicUrl) process.env.MCP_PUBLIC_URL = preservedPublicUrl; }
-function adminPage(request: Request): Response { if (!adminConfigured()) return html('<h1>Welcome to Toolsmith</h1><p>Initial setup. Buat akun administrator untuk mengamankan server.</p><form method="post" action="/setup"><label>Username</label><input name="username" minlength="3" maxlength="32" required pattern="[A-Za-z0-9._-]+"><label>Password (minimal 8 karakter)</label><div class="password-wrap"><input type="password" name="password" minlength="8" required><button type="button" class="password-toggle" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="m3 3 18 18"/></svg></button></div><label>Konfirmasi password</label><div class="password-wrap"><input type="password" name="confirm" minlength="8" required><button type="button" class="password-toggle" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="m3 3 18 18"/></svg></button></div><label>Public URL (HTTPS, opsional)</label><input type="url" name="public_url" placeholder="https://mcp.example.com"><button>Buat administrator</button></form><p class="muted">Initial setup hanya tersedia melalui localhost.</p>'); if (!hasSession(request)) return html('<h1>Toolsmith</h1><p>Login administrator untuk mengelola akses server.</p><form method="post" action="/admin/login"><label>Username</label><input name="username" autocomplete="username" required><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button>Login</button></form>'); return html('<h1>Toolsmith settings</h1><p>Administrator: ' + escapeHtml(String((sqlite.query("SELECT username FROM toolsmith_admin WHERE id=1").get() as any)?.username ?? "")) + '</p><p>API token: <code id="api-token">••••••••••••••••••••••••••••••••</code> <button type="button" id="reveal-api-token">Tampilkan</button> <button type="button" id="copy-api-token">Copy</button></p><form method="post" action="/admin/token"><button>Generate API token baru</button></form><form method="post" action="/admin/logout"><button>Logout</button></form><p class="muted">API token baru ditampilkan satu kali setelah dibuat.</p>', true); }
+async function writeSecrets(apiToken: string, sudoKey: string, username: string, publicUrl: string) { await mkdir(join(configFile, ".."), { recursive: true, mode: 0o700 }); const raw = existsSync(configFile) ? await readFile(configFile, "utf8") : "server:\n  host: 127.0.0.1\n  port: 48766\n  path: /mcp\n  transport: http\n"; const cfg = (parse(raw) ?? {}) as any; cfg.security = { ...(cfg.security ?? {}), api_token: apiToken, sudo_encryption_key: sudoKey }; delete cfg.security.setup_token; const preservedPublicUrl = preservePublicUrl(publicUrl, cfg.oauth?.public_url); cfg.oauth = { ...(cfg.oauth ?? {}), username, password: "", public_url: preservedPublicUrl }; const tmp = configFile + ".tmp"; await writeFile(tmp, stringify(cfg), { mode: 0o600 }); await chmod(tmp, 0o600); await writeFile(configFile, await readFile(tmp)); await chmod(configFile, 0o600); await Bun.file(tmp).delete(); process.env.TOOLSMITH_API_TOKEN = apiToken; process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY = sudoKey; process.env.TOOLSMITH_OAUTH_USERNAME = username; process.env.TOOLSMITH_OAUTH_PASSWORD = ""; if (preservedPublicUrl) process.env.MCP_PUBLIC_URL = preservedPublicUrl; }
+function adminPage(request: Request): Response { if (!adminConfigured()) return html('<h1>Welcome to Toolsmith</h1><p>Initial setup. Buat akun administrator untuk mengamankan server.</p><form method="post" action="/setup"><label>Setup token</label><input name="setup_token" autocomplete="off" required><label>Username</label><input name="username" minlength="3" maxlength="32" required pattern="[A-Za-z0-9._-]+"><label>Password (minimal 8 karakter)</label><div class="password-wrap"><input type="password" name="password" minlength="8" required><button type="button" class="password-toggle" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="m3 3 18 18"/></svg></button></div><label>Konfirmasi password</label><div class="password-wrap"><input type="password" name="confirm" minlength="8" required><button type="button" class="password-toggle" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="m3 3 18 18"/></svg></button></div><label>Public URL (HTTPS, opsional)</label><input type="url" name="public_url" placeholder="https://mcp.example.com"><button>Buat administrator</button></form><p class="muted">Gunakan token satu kali yang ditampilkan oleh perintah <code>toolsmith setup-token</code> saat diperlukan.</p>'); if (!hasSession(request)) return html('<h1>Toolsmith</h1><p>Login administrator untuk mengelola akses server.</p><form method="post" action="/admin/login"><label>Username</label><input name="username" autocomplete="username" required><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button>Login</button></form>'); return html('<h1>Toolsmith settings</h1><p>Administrator: ' + escapeHtml(String((sqlite.query("SELECT username FROM toolsmith_admin WHERE id=1").get() as any)?.username ?? "")) + '</p><p>API token: <code id="api-token">••••••••••••••••••••••••••••••••</code> <button type="button" id="reveal-api-token">Tampilkan</button> <button type="button" id="copy-api-token">Copy</button></p><form method="post" action="/admin/token"><button>Generate API token baru</button></form><form method="post" action="/admin/logout"><button>Logout</button></form><p class="muted">API token baru ditampilkan satu kali setelah dibuat.</p>', true); }
 async function adminRequest(request: Request, path: string): Promise<Response | null> {
   if (path === "/" && request.method === "GET") return adminPage(request);
   if (path === "/setup/status" && request.method === "GET") return json({ configured: adminConfigured() });
+
+  const browserPost = request.method === "POST" &&
+    (path === "/setup" || path === "/admin/login" || path.startsWith("/admin/"));
+  if (browserPost && !isSameOriginRequest(request)) {
+    return json({ error: "Cross-origin request rejected" }, 403);
+  }
+
   if (path === "/setup" && request.method === "POST") {
     if (adminConfigured()) return json({ error: "Setup already completed" }, 409);
-    const host = new URL(request.url).hostname;
-    if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) return json({ error: "Initial setup is only allowed through localhost. Use an SSH tunnel." }, 403);
-    const form = new URLSearchParams(await request.text()), user = form.get("username") ?? "", pass = form.get("password") ?? "";
+    if (isLoginBlocked(request, "__setup__")) return json({ error: "Too many setup attempts. Try again later." }, 429);
+    const form = new URLSearchParams(await request.text());
+    const config = parse(await readFile(configFile, "utf8")) as { security?: { setup_token?: string } };
+    const expectedSetupToken = config.security?.setup_token ?? "";
+    if (!expectedSetupToken || !safeEqual(form.get("setup_token") ?? "", expectedSetupToken)) {
+      recordLoginFailure(request, "__setup__");
+      return json({ error: "Invalid or expired setup token" }, 403);
+    }
+    clearLoginFailures(request, "__setup__");
+    const user = form.get("username") ?? "", pass = form.get("password") ?? "";
     if (!/^[A-Za-z0-9._-]{3,32}$/.test(user) || pass.length < 8 || pass !== form.get("confirm")) return html('<h1>Setup gagal</h1><p class="error">Username/password tidak valid atau konfirmasi tidak cocok.</p><a href="/">Coba lagi</a>');
     const publicUrl = form.get("public_url") ?? "";
     if (publicUrl) { try { const parsed = new URL(publicUrl); if (parsed.protocol !== "https:" || parsed.pathname !== "/" || parsed.search || parsed.hash) throw new Error(); } catch { return html('<h1>Setup gagal</h1><p class="error">Public URL harus berupa origin HTTPS, contoh https://mcp.example.com</p><a href="/">Coba lagi</a>'); } }
     const salt = randomBytes(16), api = randomBytes(32).toString("hex"), sudo = randomBytes(32).toString("hex");
-    await writeSecrets(api, sudo, user, publicUrl);
-    sqlite.query("INSERT INTO toolsmith_admin (id, username, salt, password_hash, created_at) VALUES (1, ?, ?, ?, ?)").run(user, salt.toString("hex"), passwordHash(pass, salt), now());
-    const token = randomBytes(32).toString("base64url"); sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(token), now() + 604800);
+    try {
+      sqlite.query("INSERT INTO toolsmith_admin (id, username, salt, password_hash, created_at) VALUES (1, ?, ?, ?, ?)").run(user, salt.toString("hex"), passwordHash(pass, salt), now());
+    } catch {
+      return json({ error: "Setup already completed" }, 409);
+    }
+    try {
+      await writeSecrets(api, sudo, user, publicUrl);
+    } catch (error) {
+      sqlite.query("DELETE FROM toolsmith_admin WHERE id = 1").run();
+      throw error;
+    }
+    const token = randomToken();
+    sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(token), now() + 604800);
     return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(token, 604800, request), "cache-control": "no-store" } });
   }
-  if (path === "/admin/login" && request.method === "POST") { const form = new URLSearchParams(await request.text()); if (!verifyAdmin(form.get("username") ?? "", form.get("password") ?? "")) return html('<h1>Login gagal</h1><p class="error">Username atau password salah.</p><a href="/">Coba lagi</a>'); const token = randomBytes(32).toString("base64url"); sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(token), now() + 604800); return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(token, 604800, request), "cache-control": "no-store" } }); }
+
+  if (path === "/admin/login" && request.method === "POST") {
+    const form = new URLSearchParams(await request.text()), username = form.get("username") ?? "";
+    if (isLoginBlocked(request, username)) return json({ error: "Too many login attempts. Try again in 15 minutes." }, 429, { "retry-after": String(LOGIN_WINDOW_SECONDS) });
+    if (!verifyAdmin(username, form.get("password") ?? "")) {
+      recordLoginFailure(request, username);
+      return html('<h1>Login gagal</h1><p class="error">Username atau password salah.</p><a href="/">Coba lagi</a>');
+    }
+    clearLoginFailures(request, username);
+    const token = randomToken();
+    sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(token), now() + 604800);
+    return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(token, 604800, request), "cache-control": "no-store" } });
+  }
+
   if (path.startsWith("/admin/") && !hasSession(request)) return json({ error: "Unauthorized" }, 401);
-  if (path === "/admin/logout" && request.method === "POST") { const token = sessionToken(request); if (token) sqlite.query("DELETE FROM toolsmith_admin_sessions WHERE token_hash = ?").run(hash(token)); return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie("", 0, request), "cache-control": "no-store" } }); }
-  if (path === "/admin/token" && request.method === "GET") { const cfg = parse(await readFile(configFile, "utf8")) as any; return html('<h1>API token</h1><p class="token">' + escapeHtml(String(cfg.security?.api_token ?? "Not configured")) + '</p><a href="/">Kembali</a>'); }
-  if (path === "/admin/token" && request.method === "POST") { const api = randomBytes(32).toString("hex"); const raw = await readFile(configFile, "utf8"), cfg = (parse(raw) ?? {}) as any; cfg.security = { ...(cfg.security ?? {}), api_token: api }; await writeFile(configFile, stringify(cfg), { mode: 0o600 }); await chmod(configFile, 0o600); process.env.TOOLSMITH_API_TOKEN = api; return html('<h1>API token baru</h1><p class="token">' + api + '</p><p>Simpan token ini sekarang. Nilainya tidak akan ditampilkan lagi.</p><a href="/">Kembali</a>'); }
+  if (path === "/admin/logout" && request.method === "POST") {
+    const token = sessionToken(request);
+    if (token) sqlite.query("DELETE FROM toolsmith_admin_sessions WHERE token_hash = ?").run(hash(token));
+    return new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie("", 0, request), "cache-control": "no-store" } });
+  }
+  if (path === "/admin/token" && request.method === "GET") {
+    const cfg = parse(await readFile(configFile, "utf8")) as any;
+    return html('<h1>API token</h1><p class="token">' + escapeHtml(String(cfg.security?.api_token ?? "Not configured")) + '</p><a href="/">Kembali</a>');
+  }
+  if (path === "/admin/token" && request.method === "POST") {
+    const api = randomBytes(32).toString("hex"), raw = await readFile(configFile, "utf8"), cfg = (parse(raw) ?? {}) as any;
+    cfg.security = { ...(cfg.security ?? {}), api_token: api };
+    const temp = configFile + ".tmp";
+    await writeFile(temp, stringify(cfg), { mode: 0o600 });
+    await chmod(temp, 0o600);
+    await rename(temp, configFile);
+    await chmod(configFile, 0o600);
+    process.env.TOOLSMITH_API_TOKEN = api;
+    return html('<h1>API token baru</h1><p class="token">' + api + '</p><p>Simpan token ini sekarang. Nilainya tidak akan ditampilkan lagi.</p><a href="/">Kembali</a>');
+  }
   return null;
 }
 
@@ -99,7 +190,7 @@ function loginPage(params: URLSearchParams, error = ""): Response {
     error ? '<p class="error" role="alert">' + escapeHtml(error) + '</p>' : '',
     '<form method="post" action="/oauth/authorize">' + hidden + '<div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Masukkan username" required></div><div class="field"><label for="password">Password</label><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Masukkan password" required><button type="button" id="password-toggle" class="password-toggle" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M3 3l18 18"/></svg></button></div></div><button type="submit">Authorize connection <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M10 4l6 6-6 6"/></svg></button></form><script>document.addEventListener("DOMContentLoaded",()=>{const input=document.getElementById("password"),button=document.getElementById("password-toggle");if(!input||!button)return;button.addEventListener("click",()=>{const visible=input.type==="password";input.type=visible?"text":"password";button.classList.toggle("password-visible",visible);button.setAttribute("aria-label",visible?"Sembunyikan password":"Tampilkan password");button.setAttribute("title",visible?"Sembunyikan password":"Tampilkan password")})})</script><p class="footer">Secure authorization · Toolsmith</p></div></section></main></div></html>'
   ].join("");
-  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  return new Response(html, { headers: { ...securityHeaders, "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 function metadata(path: string, request: Request): Response {
   const { issuer, resourceUrl } = oauthConfig(request);
@@ -197,13 +288,20 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
   }
 
   if (path === "/oauth/authorize" && request.method === "POST") {
+    if (!isSameOriginRequest(request)) return json({ error: "Cross-origin request rejected" }, 403);
     const form = new URLSearchParams(await request.text());
+    const submittedUsername = form.get("username") ?? "";
+    if (isLoginBlocked(request, submittedUsername)) return json({ error: "Too many login attempts. Try again in 15 minutes." }, 429, { "retry-after": String(LOGIN_WINDOW_SECONDS) });
     const clientId = form.get("client_id") ?? "", row = client(clientId);
     const redirect = form.get("redirect_uri") ?? "", challenge = form.get("code_challenge") ?? "";
     const params = new URLSearchParams();
     for (const [key, value] of form.entries()) if (key !== "username" && key !== "password") params.append(key, value);
     if (!row || !JSON.parse(row.redirect_uris).includes(redirect) || form.get("response_type") !== "code" || form.get("code_challenge_method") !== "S256" || !challenge) return json({ error: "invalid_request" }, 400);
-    if (!verifyAdmin(form.get("username") ?? "", form.get("password") ?? "")) return loginPage(params, "Invalid username or password.");
+    if (!verifyAdmin(form.get("username") ?? "", form.get("password") ?? "")) {
+      recordLoginFailure(request, form.get("username") ?? "");
+      return loginPage(params, "Invalid username or password.");
+    }
+    clearLoginFailures(request, form.get("username") ?? "");
     const resource = form.get("resource") || resourceUrl!.href;
     if (resource !== resourceUrl!.href) return json({ error: "invalid_target" }, 400);
     const code = randomToken();
