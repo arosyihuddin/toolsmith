@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { getProcessSnapshots, registerManagedProcess, stopManagedProcess } from "../src/process";
-import { handleProcessesApi } from "../src/dashboard/processes-api";
+import { getProcessSnapshots, registerManagedProcess, stopManagedProcess } from "../src/modules/process";
+import { handleProcessesApi } from "../src/modules/dashboard/processes-api";
 
 describe("managed process registry", () => {
   test("tracks a process lifecycle without exposing stop callbacks", async () => {

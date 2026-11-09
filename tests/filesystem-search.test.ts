@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fsFind, fsGrep } from "../src/filesystem/search";
+import { fsFind, fsGrep } from "../src/modules/filesystem/search";
 
 const directories: string[] = [];
 afterEach(async () => {

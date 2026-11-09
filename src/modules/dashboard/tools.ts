@@ -1,4 +1,4 @@
-import { getToolCatalog, type ToolCatalogEntry } from "../control-plane/tools/registry";
+import { getToolCatalog, type ToolCatalogEntry } from "../../control-plane/tools/registry";
 
 export type DashboardTool = ToolCatalogEntry;
 

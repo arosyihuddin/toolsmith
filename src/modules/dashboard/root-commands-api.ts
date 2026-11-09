@@ -1,4 +1,4 @@
-import { getRootCommandConfig, saveRootCommandConfig, saveRootPassword } from "../control-plane/root-commands";
+import { getRootCommandConfig, saveRootCommandConfig, saveRootPassword } from "../../control-plane/root-commands";
 
 export async function handleRootCommandsApi(request: Request, url: URL): Promise<Response | null> {
   if (url.pathname === "/api/root-commands" && request.method === "GET") {

@@ -1,8 +1,8 @@
 import { subscribeDashboardEvents } from "./events";
 import { getProcessSnapshots } from "../process";
-import { config } from "../lib/config";
+import { config } from "../../lib/config";
 import { listApprovals } from "../approval";
-import { countToolCallsToday } from "../control-plane/logs";
+import { countToolCallsToday } from "../../control-plane/logs";
 import { getCpuInfo, getDiskInfo, getDisplayInfo, getDesktopInfo, getGpuInfo, getMemoryInfo, getNetworkInfo, getOsInfo, getRuntimeInfo } from "../system/info";
 
 let dashboardStaticCache: {

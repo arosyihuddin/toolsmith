@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { executeRootCommand } from "../../control-plane/root-commands";
+import { executeRootCommand } from "../../../control-plane/root-commands";
 import { registerExposedTool } from "./register";
 import { errorMessage, errorResult, result } from "./shared";
 

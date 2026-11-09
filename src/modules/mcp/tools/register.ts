@@ -2,14 +2,14 @@ import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server
 import type { AnySchema, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ensureToolConfig, isToolExposed, subscribeToolExposure } from "../../control-plane/tools/exposure";
-import { recordToolCallLog, updateToolCallLog } from "../../control-plane/logs";
-import { getToolPermission } from "../../control-plane/tools/permissions";
-import { evaluateCustomPermissionRule } from "../../control-plane/tools/custom-rules";
+import { ensureToolConfig, isToolExposed, subscribeToolExposure } from "../../../control-plane/tools/exposure";
+import { recordToolCallLog, updateToolCallLog } from "../../../control-plane/logs";
+import { getToolPermission } from "../../../control-plane/tools/permissions";
+import { evaluateCustomPermissionRule } from "../../../control-plane/tools/custom-rules";
 import { getApprovalDecisionMessage, requestApproval } from "../../approval";
-import { isRootCommandWhitelisted } from "../../control-plane/root-commands";
+import { isRootCommandWhitelisted } from "../../../control-plane/root-commands";
 import { errorResult } from "./shared";
-import { registerToolInputSchema } from "../../control-plane/tools/input-schema";
+import { registerToolInputSchema } from "../../../control-plane/tools/input-schema";
 const handles = new WeakMap<McpServer, Map<string, RegisteredTool>>();
 const subscribedServers = new WeakSet<McpServer>();
 

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomBytes, scryptSync } from "node:crypto";
-import { resetAdminPassword } from "../src/lib/admin-password";
+import { resetAdminPassword } from "../src/modules/auth/admin-password";
 
 describe("resetAdminPassword", () => {
   let database: Database;

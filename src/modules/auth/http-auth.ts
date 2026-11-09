@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { verifyOAuthAccessToken } from "./oauth";
+import { verifyOAuthAccessToken } from "./http";
 import { resolvePublicOrigin } from "./public-origin";
 
 

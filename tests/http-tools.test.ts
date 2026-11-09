@@ -216,11 +216,11 @@ describe("MCP Streamable HTTP tool coverage", () => {
       expect(waited.isError).not.toBe(true);
       const github = await callTool(client, "github", { operation: "auth_status" });
       expect(github.isError).not.toBe(true);
-      const astMatches = await callTool(client, "ast_grep", { pattern: "registerExposedTool($A, $B, $$$REST)", path: "src/mcp/tools", language: "ts", max_results: 3 });
+      const astMatches = await callTool(client, "ast_grep", { pattern: "registerExposedTool($A, $B, $$$REST)", path: "src/modules/mcp/tools", language: "ts", max_results: 3 });
       expect(astMatches.isError).not.toBe(true);
       expect((astMatches.content as Array<{ text?: string }>).some((item) => item.text?.includes("registerExposedTool"))).toBe(true);
 
-      const astPreview = await callToolWithApproval(client, "ast_edit", { pattern: "registerExposedTool($A, $B, $$$REST)", rewrite: "PREVIEW_ONLY", path: "src/mcp/tools", language: "ts", dry_run: true });
+      const astPreview = await callToolWithApproval(client, "ast_edit", { pattern: "registerExposedTool($A, $B, $$$REST)", rewrite: "PREVIEW_ONLY", path: "src/modules/mcp/tools", language: "ts", dry_run: true });
       expect(astPreview.isError).not.toBe(true);
       expect((astPreview.content as Array<{ text?: string }>).some((item) => item.text?.includes("Preview only"))).toBe(true);
 

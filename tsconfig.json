@@ -1,12 +1,15 @@
 {
+  "extends": "$app/tsconfig",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true,
-    "types": ["bun"]
+    "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "src/ui/**/*.ts",
+    "src/ui/**/*.svelte"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

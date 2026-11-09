@@ -4,6 +4,9 @@ node_modules/
 *.log
 data/
 dist/
+.svelte-kit/
 
 .toolsmith/
+config.yml
+config.yaml
 .test-data/

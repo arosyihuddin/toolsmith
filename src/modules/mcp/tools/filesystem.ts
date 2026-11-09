@@ -1,8 +1,8 @@
 import { registerExposedTool } from "./register";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { config } from "../../lib/config";
-import { logger } from "../../lib/logger";
+import { config } from "../../../lib/config";
+import { logger } from "../../../lib/logger";
 import { fsFind, fsGrep } from "../../filesystem/search";
 import { errorMessage, errorResult, logValue, result } from "./shared";
 

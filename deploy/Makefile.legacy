@@ -119,7 +119,7 @@ install:
 	install -d -o $(SERVICE_USER) -g $(SERVICE_GROUP) -m 0755 $(INSTALL_DIR)/bin
 	install -d -o $(SERVICE_USER) -g $(SERVICE_GROUP) -m 0755 $(DATA_DIR)
 	install -d -o $(SERVICE_USER) -g $(SERVICE_GROUP) -m 0755 $(WORKSPACE_DIR)
-	cp -a src package.json bun.lock tsconfig.json README.md .env.example deploy $(INSTALL_DIR)/
+	cp -a src package.json bun.lock tsconfig.json tsconfig.backend.json vite.config.ts README.md .env.example deploy $(INSTALL_DIR)/
 	install -m 0755 $(BUN) $(INSTALL_DIR)/bin/bun
 	@if [ ! -f $(INSTALL_DIR)/.env ]; then cp $(INSTALL_DIR)/.env.example $(INSTALL_DIR)/.env; fi
 	@if [ -f $(INSTALL_DIR)/.env ]; then \
@@ -133,7 +133,7 @@ install:
 		sed -i 's|^MCP_TRANSPORT=.*|MCP_TRANSPORT=$(SETUP_TRANSPORT)|' $(INSTALL_DIR)/.env; \
 		sed -i 's|^MCP_HTTP_HOST=.*|MCP_HTTP_HOST=$(SETUP_HOST)|' $(INSTALL_DIR)/.env; \
 	fi
-	cd $(INSTALL_DIR) && $(INSTALL_DIR)/bin/bun install --production --frozen-lockfile && PATH="$(INSTALL_DIR)/bin:$$PATH" $(INSTALL_DIR)/bin/bun run build
+	cd $(INSTALL_DIR) && $(INSTALL_DIR)/bin/bun install --frozen-lockfile && PATH="$(INSTALL_DIR)/bin:$$PATH" $(INSTALL_DIR)/bin/bun run build && $(INSTALL_DIR)/bin/bun install --production --frozen-lockfile
 	rm -rf $(INSTALL_DIR)/src
 	chown -R $(SERVICE_USER):$(SERVICE_GROUP) $(INSTALL_DIR)
 	chown -R $(SERVICE_USER):$(SERVICE_GROUP) $(DATA_DIR)
@@ -164,9 +164,10 @@ update:
 	test -d "$(INSTALL_DIR)" || { echo "Installation not found at $(INSTALL_DIR); run 'make install' first."; exit 1; }; \
 	echo "[update] Syncing source to build a production bundle; preserving $(INSTALL_DIR)/.env and other systemd settings."; \
 	rm -rf "$(INSTALL_DIR)/src" "$(INSTALL_DIR)/dist"; cp -a "$$source_dir/src" "$(INSTALL_DIR)/src"; \
-	install -m 0644 "$$source_dir/package.json" "$$source_dir/bun.lock" "$$source_dir/tsconfig.json" "$(INSTALL_DIR)/"; \
-	cd "$(INSTALL_DIR)" && "$(INSTALL_DIR)/bin/bun" install --production --frozen-lockfile; \
+	install -m 0644 "$$source_dir/package.json" "$$source_dir/bun.lock" "$$source_dir/tsconfig.json" "$$source_dir/tsconfig.backend.json" "$$source_dir/vite.config.ts" "$(INSTALL_DIR)/"; \
+	cd "$(INSTALL_DIR)" && "$(INSTALL_DIR)/bin/bun" install --frozen-lockfile; \
 	PATH="$(INSTALL_DIR)/bin:$$PATH" "$(INSTALL_DIR)/bin/bun" run build; \
+	cd "$(INSTALL_DIR)" && "$(INSTALL_DIR)/bin/bun" install --production --frozen-lockfile; \
 	rm -rf "$(INSTALL_DIR)/src"; \
 	chown -R "$(SERVICE_USER):$(SERVICE_GROUP)" "$(INSTALL_DIR)/dist" "$(INSTALL_DIR)/node_modules"; \
 	chown "$(SERVICE_USER):$(SERVICE_GROUP)" "$(INSTALL_DIR)/package.json" "$(INSTALL_DIR)/bun.lock" "$(INSTALL_DIR)/tsconfig.json"; \

@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { config } from "../../lib/config";
+import { config } from "../../../lib/config";
 import { registerExposedTool } from "./register";
 import { errorMessage, errorResult, result } from "./shared";
 import { registerManagedProcess, terminateProcessGroup } from "../../process";

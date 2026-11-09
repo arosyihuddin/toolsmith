@@ -1,8 +1,8 @@
 import { getDashboardTools } from "./tools";
-import { setToolExposed } from "../control-plane/tools/exposure";
-import { permissionModes, customRules, setSectionPermission, setToolPermission, resetSectionToolOverrides, getSectionPermissions, getSectionCustomRules, type PermissionMode, type PermissionSection } from "../control-plane/tools/permissions";
-import { isCustomPermissionRule, normalizeCustomPermissionRule } from "../control-plane/tools/custom-rules";
-import { validateCustomRuleFields } from "../control-plane/tools/input-schema";
+import { setToolExposed } from "../../control-plane/tools/exposure";
+import { permissionModes, customRules, setSectionPermission, setToolPermission, resetSectionToolOverrides, getSectionPermissions, getSectionCustomRules, type PermissionMode, type PermissionSection } from "../../control-plane/tools/permissions";
+import { isCustomPermissionRule, normalizeCustomPermissionRule } from "../../control-plane/tools/custom-rules";
+import { validateCustomRuleFields } from "../../control-plane/tools/input-schema";
 
 export async function handleToolsApi(request: Request, url: URL): Promise<Response | null> {
   const sectionPermissionMatch = url.pathname.match(

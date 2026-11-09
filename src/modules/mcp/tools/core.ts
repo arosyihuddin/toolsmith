@@ -7,7 +7,7 @@ import { fsFind, fsGrep } from "../../filesystem/search";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerExposedTool } from "./register";
-import { config } from "../../lib/config";
+import { config } from "../../../lib/config";
 import { errorMessage, errorResult, result } from "./shared";
 import { registerManagedProcess, terminateProcessGroup } from "../../process";
 

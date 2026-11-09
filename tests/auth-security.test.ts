@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isSameOriginRequest, isSecureRequest, readCookie, requestOrigin } from "../src/lib/auth-security";
+import { isSameOriginRequest, isSecureRequest, readCookie, requestOrigin } from "../src/modules/auth/security";
 
 describe("administrator request security helpers", () => {
   test("matches direct HTTPS origins", () => {

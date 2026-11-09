@@ -62,7 +62,7 @@ Choose transport with MCP_TRANSPORT=http|stdio|both. Configure the listener usin
 
 ## Configuration
 
-Installed deployments use `~/.toolsmith/config/config.yml`. Environment variables override YAML values. Existing `.env` configuration is migrated automatically while preserving credentials.
+Development runs read `config.yml` from the repository root. Installed production deployments use `~/.toolsmith/config/config.yml`. Set `TOOLSMITH_CONFIG` to override either path. Environment variables override YAML values. Keep local `config.yml` credentials private; the file is excluded from Git.
 
 | Variable | Purpose |
 | --- | --- |

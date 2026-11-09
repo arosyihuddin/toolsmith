@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { terminalManager } from "../src/terminal";
+import { terminalManager } from "../src/modules/terminal";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

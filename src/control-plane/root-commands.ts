@@ -2,7 +2,7 @@ import { accessSync, constants, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { registerManagedProcess } from "../process";
+import { registerManagedProcess } from "../modules/process";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { workspacePrefs } from "./db/schema";

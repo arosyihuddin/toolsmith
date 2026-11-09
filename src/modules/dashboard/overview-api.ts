@@ -1,7 +1,7 @@
-import { config } from "../lib/config";
+import { config } from "../../lib/config";
 import { getSystemInfo } from "../system/info";
 import { listApprovals } from "../approval";
-import { countToolCallsToday, listToolCallLogs } from "../control-plane/logs";
+import { countToolCallsToday, listToolCallLogs } from "../../control-plane/logs";
 import { getDashboardTools } from "./tools";
 
 export async function handleOverviewApi(request: Request, url: URL): Promise<Response | null> {

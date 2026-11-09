@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolvePublicOrigin } from "../src/lib/public-origin";
+import { resolvePublicOrigin } from "../src/modules/auth/public-origin";
 
 describe("resolvePublicOrigin", () => {
   test("prefers HTTPS reverse-proxy headers over the configured fallback", () => {

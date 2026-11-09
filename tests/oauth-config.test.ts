@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { preservePublicUrl } from "../src/lib/oauth-config";
+import { preservePublicUrl } from "../src/modules/auth/oauth-config";
 
 describe("preservePublicUrl", () => {
   test("keeps the configured public URL when setup submits an empty value", () => {

@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gte, lt } from "drizzle-orm";
 import { db } from "../db";
 import { toolCallLogs, type NewToolCallLog, type ToolCallLog } from "../db/schema";
-import { emitDashboardEvent } from "../../dashboard/events";
+import { emitDashboardEvent } from "../../modules/dashboard/events";
 
 export type ToolCallLogInput = Omit<NewToolCallLog, "id">;
 

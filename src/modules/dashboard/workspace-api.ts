@@ -33,7 +33,7 @@ import {
   setPref,
   touchRecent,
   updateProfile,
-} from "../control-plane/workspace";
+} from "../../control-plane/workspace";
 
 export class HttpError extends Error {
   constructor(

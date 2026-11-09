@@ -317,7 +317,7 @@ async function resetAdminPasswordCommand() {
   process.env.NODE_ENV = "production";
   process.env.TOOLSMITH_CONFIG ??= CONFIG_FILE;
   const { sqlite } = await import("./control-plane/db");
-  const { resetAdminPassword } = await import("./lib/admin-password");
+  const { resetAdminPassword } = await import("./modules/auth/admin-password");
   const password = await promptHidden("New admin password (min. 8 characters): ");
   const confirmation = await promptHidden("Confirm new password: ");
   if (password !== confirmation) throw new Error("Password confirmation does not match.");

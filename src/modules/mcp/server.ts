@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import "../control-plane/db";
+import "../../control-plane/db";
 import { registerTools } from "./tools";
 
 export async function createServer() {

@@ -19,79 +19,75 @@ Dokumen ini menjadi acuan yang relatif stabil untuk batas modul, tanggung jawab 
 
 ## 2. Struktur direktori
 
-Struktur berikut menggambarkan pembagian tanggung jawab yang diinginkan. Ini bukan instruksi untuk memindahkan semua file sekaligus; struktur aktual yang belum mengikuti bentuk ini boleh dirapikan secara bertahap.
+Struktur aktual setelah reorganisasi domain backend dan pemisahan UI internal:
 
 ```text
 toolsmith/
 ├── src/
-│   ├── index.ts                  # startup, transport, HTTP dispatch, graceful shutdown
+│   ├── index.ts                  # entrypoint proses
+│   ├── app.ts                    # composition root: transport, HTTP dispatch, lifecycle
 │   ├── app/
 │   │   └── http.ts               # MCP Streamable HTTP session/transport lifecycle
-│   ├── mcp/
-│   │   ├── server.ts             # membuat MCP server
-│   │   └── tools/
-│   │       ├── index.ts          # registrasi grup tool
-│   │       ├── register.ts       # policy enforcement dan wrapper pemanggilan tool
-│   │       ├── shared.ts         # helper respons/error yang dipakai beberapa tool
-│   │       ├── core.ts           # operasi workspace/file dasar
-│   │       ├── filesystem.ts     # tool filesystem/search
-│   │       ├── extended.ts       # tool tambahan yang tidak punya domain terpisah
-│   │       ├── computer.ts       # capability komputer yang masih didukung
-│   │       ├── system.ts         # diagnostik host
-│   │       ├── root.ts           # operasi privileged yang dibatasi
-│   │       └── tunnels.ts        # tool pengelolaan tunnel
+│   ├── modules/
+│   │   ├── auth/                 # admin authentication, OAuth, auth HTTP endpoints
+│   │   ├── mcp/                  # MCP server dan tool protocol adapters
+│   │   │   └── tools/
+│   │   ├── dashboard/            # HTTP API untuk Toolsmith Console terpisah
+│   │   ├── terminal/             # lifecycle terminal dan WebSocket I/O
+│   │   ├── process/              # registry lifecycle subprocess milik Toolsmith
+│   │   ├── tunnels/              # lifecycle proses Cloudflare Quick Tunnel
+│   │   ├── approval/             # state approval, keputusan, pembatalan
+│   │   ├── computer/             # capability komputer per OS
+│   │   │   ├── linux/
+│   │   │   ├── macos/
+│   │   │   └── windows/
+│   │   ├── filesystem/           # operasi filesystem reusable
+│   │   └── system/               # informasi host
 │   ├── control-plane/
 │   │   ├── db/                   # koneksi SQLite, schema, migrations
-│   │   ├── tools/                # katalog, exposure, permission, custom rules, input schema
+│   │   ├── tools/                # katalog, exposure, permission, custom rules
 │   │   ├── logs/                 # persistensi log pemanggilan tool
 │   │   ├── workspace/            # operasi metadata/workspace
 │   │   └── root-commands.ts      # aturan allowlist perintah privileged
-│   ├── dashboard/                # HTTP API untuk Toolsmith Console
-│   ├── terminal/                 # lifecycle terminal dan WebSocket I/O
-│   ├── process/                  # registry lifecycle subprocess milik Toolsmith
-│   ├── tunnels/                  # lifecycle proses Cloudflare Quick Tunnel
-│   ├── approval/                 # state approval, keputusan, pembatalan
-│   ├── computer/
-│   │   ├── index.ts              # pemilihan capability berdasarkan OS
-│   │   ├── linux/                # implementasi khusus Linux
-│   │   ├── macos/                # implementasi khusus macOS yang tersedia
-│   │   └── windows/              # implementasi khusus Windows yang tersedia
-│   ├── filesystem/               # operasi filesystem reusable
-│   ├── system/                   # informasi host
-│   └── lib/
-│       ├── config.ts             # konfigurasi environment terpusat
-│       ├── logger.ts             # logging
-│       ├── http-auth.ts          # autentikasi HTTP internal
-│       ├── oauth.ts              # OAuth
-│       └── working-directory.ts # resolusi working directory
-├── tests/                        # unit, integration, dan regression tests
-├── deploy/                       # artefak deployment/kompatibilitas legacy
+│   ├── ui/                       # SvelteKit UI internal Toolsmith, bukan Console
+│   │   ├── lib/components/
+│   │   ├── routes/
+│   │   └── static/
+│   └── lib/                      # utilitas lintas domain yang kecil dan stabil
+├── tests/
+├── deploy/
 ├── ARCHITECTURE.md
 ├── README.md
-├── PLAN.md / TODO.md
 └── package.json
 ```
 
-Struktur dapat berubah saat refactor. Jangan membuat folder kosong atau memindahkan file hanya untuk mencocokkan diagram. Jika suatu domain berkembang dan memiliki beberapa use case, pertimbangkan memecahnya menjadi modul internal yang lebih jelas.
+src/ui/ dibangun sebagai static SPA ke dist/ui/ dan disajikan oleh HTTP server Bun yang sama. Toolsmith tetap satu executable/service. src/modules/dashboard/ hanya API backend untuk proyek Toolsmith Console terpisah; jangan pindahkan frontend Console ke repository ini.
+
+Kelompokkan seluruh fitur backend berdasarkan domain di src/modules/. src/control-plane/ tetap menjadi infrastruktur persistensi dan policy, bukan tempat implementasi capability OS. Jangan membuat folder kosong atau memindahkan file hanya untuk mencocokkan diagram.
 
 ## 3. Batas tanggung jawab
 
 | Komponen | Tanggung jawab | Hindari |
 |---|---|---|
-| `src/index.ts` | Inisialisasi proses, memilih transport, merutekan request tingkat atas, graceful shutdown | Implementasi tool, query database, aturan permission yang tersebar |
-| `src/app/http.ts` | Membuat dan menutup session MCP HTTP, menghubungkan request dengan transport | Implementasi tool atau endpoint dashboard |
-| `src/mcp/server.ts` | Membuat instance MCP server dan menginisialisasi registrasi tool | Logika transport HTTP tingkat proses |
-| `src/mcp/tools/*.ts` | Mendefinisikan schema, metadata, dan handler untuk grup tool | Mem-bypass policy wrapper atau menampung logika lintas domain yang besar |
-| `src/mcp/tools/register.ts` | Satu enforcement point untuk exposure, permission, custom rules, approval, dan call logging | Menjadi tempat implementasi bisnis semua tool |
-| `src/control-plane/tools/` | Katalog tool, konfigurasi exposure, permission, aturan custom, schema input | Menjalankan capability OS atau terminal secara langsung |
-| `src/control-plane/db/` | Koneksi SQLite, schema Drizzle, dan migration | Aturan bisnis khusus satu tool |
-| `src/dashboard/` | Handler API yang dipakai Toolsmith Console | Menganggap UI sebagai sumber otorisasi atau menyajikan frontend Console |
-| `src/terminal/` | Membuat, melacak, mengirim input/output, dan menghentikan sesi terminal | Mengelola proses yang tidak dibuat atau dimiliki Toolsmith |
-| `src/tunnels/` | Mengelola lifecycle proses tunnel dan API terkait | Menyimpan lifecycle proses di handler MCP terpisah |
-| `src/approval/` | State approval, keputusan, dan pembatalan yang dapat dipakai wrapper tool | Mengandalkan keputusan dari frontend tanpa verifikasi server |
-| `src/computer/` | Adaptor capability komputer per OS | Mengekspos fungsi OS yang belum didukung atau belum diuji |
-| `src/lib/` | Utilitas lintas domain yang kecil dan stabil | Menjadi folder serba-ada untuk logika fitur |
-| `tests/` | Regression, unit, dan integration tests | Mengakses database/port produksi atau bergantung pada urutan test |
+| src/index.ts | Entrypoint yang memanggil composition root dan memasang signal handler | Implementasi transport atau routing |
+| src/app.ts | Menginisialisasi transport, merutekan request, menyatukan modul, dan mengelola graceful shutdown | Implementasi domain atau query database |
+| src/app/http.ts | Membuat dan menutup session MCP HTTP, menghubungkan request dengan transport | Implementasi tool atau endpoint dashboard |
+| src/modules/mcp/server.ts | Membuat instance MCP server dan menginisialisasi registrasi tool | Logika transport HTTP tingkat proses |
+| src/modules/mcp/tools/*.ts | Mendefinisikan schema, metadata, dan handler untuk grup tool | Mem-bypass policy wrapper atau menampung logika lintas domain yang besar |
+| src/modules/mcp/tools/register.ts | Satu enforcement point untuk exposure, permission, custom rules, approval, dan call logging | Menjadi tempat implementasi bisnis semua tool |
+| src/control-plane/tools/ | Katalog tool, konfigurasi exposure, permission, aturan custom, schema input | Menjalankan capability OS atau terminal secara langsung |
+| src/control-plane/db/ | Koneksi SQLite, schema Drizzle, dan migration | Aturan bisnis khusus satu tool |
+| src/modules/auth/ | Admin authentication, OAuth protocol endpoints, dan penyajian UI internal | Menyimpan markup halaman sebagai string HTML |
+| src/modules/dashboard/ | Handler API yang dipakai Toolsmith Console | Menyajikan frontend Console atau menganggap UI sebagai sumber otorisasi |
+| src/modules/terminal/ | Membuat, melacak, mengirim input/output, dan menghentikan sesi terminal | Mengelola proses yang tidak dibuat atau dimiliki Toolsmith |
+| src/modules/process/ | Registry lifecycle subprocess yang dimiliki Toolsmith | Mengelola proses asing |
+| src/modules/tunnels/ | Mengelola lifecycle proses tunnel dan API terkait | Menyimpan lifecycle proses di handler MCP terpisah |
+| src/modules/approval/ | State approval, keputusan, dan pembatalan yang dapat dipakai wrapper tool | Mengandalkan keputusan dari frontend tanpa verifikasi server |
+| src/modules/computer/ | Adaptor capability komputer per OS | Mengekspos fungsi OS yang belum didukung atau belum diuji |
+| src/modules/filesystem/, src/modules/system/ | Capability filesystem dan informasi host | Mencampur implementasi domain dengan transport |
+| src/ui/ | SvelteKit UI internal: setup, login, OAuth authorization, dan halaman administrasi | Menjadi frontend Toolsmith Console |
+| src/lib/ | Utilitas lintas domain yang kecil dan stabil | Menjadi folder serba-ada untuk logika fitur |
+| tests/ | Regression, unit, dan integration tests | Mengakses database/port produksi atau bergantung pada urutan test |
 
 ### Aturan pemisahan API dan use case
 
@@ -147,7 +143,7 @@ Aturan wajib:
 - Endpoint internal harus melewati autentikasi yang sesuai. Jangan menganggap request dari Console otomatis tepercaya.
 - Validasi method, path, input, dan otorisasi dilakukan di server.
 - Perubahan kontrak API harus memperbarui handler, auth/method checks, test, dan dokumentasi secara bersamaan.
-- `src/dashboard/` menyediakan API yang dikonsumsi proyek Toolsmith Console terpisah; perubahan kontrak mungkin memerlukan perubahan dan pengujian di repository Console.
+- src/modules/dashboard/ menyediakan API yang dikonsumsi proyek Toolsmith Console terpisah; perubahan kontrak mungkin memerlukan perubahan dan pengujian di repository Console.
 - Jangan menambahkan endpoint dashboard dengan menyisipkan logika bisnis panjang ke dispatcher utama. Pecah handler berdasarkan area fungsional.
 - Respons error harus konsisten dan tidak membocorkan stack trace, token, password, secret, atau detail internal.
 
@@ -178,7 +174,7 @@ Setiap subprocess harus memiliki:
 Aturan tambahan:
 
 - Proses background harus diregistrasikan dan memiliki semantik stop yang jelas.
-- Subprocess bash, eval, sudo_exec, terminal, dan tunnel yang dikelola didaftarkan ke src/process/; pemilik aslinya tetap bertanggung jawab untuk stop, exit, dan cleanup.
+- Subprocess bash, eval, sudo_exec, terminal, dan tunnel yang dikelola didaftarkan ke src/modules/process/; pemilik aslinya tetap bertanggung jawab untuk stop, exit, dan cleanup.
 - Process Monitor hanya menampilkan proses yang didaftarkan oleh instance Toolsmith aktif. Registry bersifat in-memory; riwayat tidak dipulihkan setelah restart dan PID dari proses lain tidak boleh dihentikan.
 - Resource Linux dibaca dari /proc; metrik yang tidak tersedia pada OS lain harus ditampilkan sebagai tidak tersedia, bukan diperkirakan.
 - Hanya kirim signal ke process group yang dibuat dan dimiliki Toolsmith.
