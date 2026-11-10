@@ -310,7 +310,37 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
   }
 
   if (path === "/oauth/authorize" && request.method === "POST") {
-    if (!isSameOriginRequest(request)) return json({ error: "Cross-origin request rejected" }, 403);
+    const sameOrigin = isSameOriginRequest(request);
+    let refererOrigin: string | null = null;
+    try {
+      const referer = request.headers.get("referer");
+      if (referer) refererOrigin = new URL(referer).origin;
+    } catch {}
+    let cfVisitorScheme: string | null = null;
+    try {
+      const visitor = request.headers.get("cf-visitor");
+      if (visitor) {
+        const scheme = JSON.parse(visitor).scheme;
+        if (typeof scheme === "string") cfVisitorScheme = scheme;
+      }
+    } catch {}
+    let requestUrlOrigin: string | null = null;
+    try { requestUrlOrigin = new URL(request.url).origin; } catch {}
+    logger.debug({
+      event: "oauth_authorize_origin_check",
+      method: request.method,
+      path,
+      outcome: sameOrigin ? "accepted" : "rejected",
+      origin: request.headers.get("origin"),
+      refererOrigin,
+      host: request.headers.get("host"),
+      forwardedHost: request.headers.get("x-forwarded-host"),
+      forwardedProto: request.headers.get("x-forwarded-proto"),
+      cfVisitorScheme,
+      requestUrlOrigin,
+      resolvedOrigin: requestOrigin(request),
+    }, "OAuth authorization origin check");
+    if (!sameOrigin) return json({ error: "Cross-origin request rejected" }, 403);
     const form = new URLSearchParams(await request.text());
     const submittedUsername = form.get("username") ?? "";
     if (isLoginBlocked(request, submittedUsername)) return json({ error: "Too many login attempts. Try again in 15 minutes." }, 429, { "retry-after": String(LOGIN_WINDOW_SECONDS) });
