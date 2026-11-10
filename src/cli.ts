@@ -249,19 +249,40 @@ async function bootstrap(sourceDir?: string) {
   }
   await writeUnit();
   systemctl("start", SERVICE);
-  print("Installed and started.");
   const installedConfig = parse(await readFile(CONFIG_FILE, "utf8")) as { server?: { host?: string; port?: number } };
   const host = installedConfig.server?.host ?? "127.0.0.1";
   const port = installedConfig.server?.port ?? 48765;
+  print("");
+  print("Installation completed successfully.");
+  print("");
+  print("Service: Toolsmith is installed, enabled, and running.");
   print("MCP endpoint: http://" + host + ":" + port + "/mcp");
   print("Configuration: " + CONFIG_FILE);
   print("Data: " + DATA);
   const setupConfig = parse(await readFile(CONFIG_FILE, "utf8")) as { security?: { setup_token?: string } };
   const setupHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
+  print("");
+  print("NEXT STEP: Activate the Toolsmith CLI in your current shell");
+  print("  Run:");
+  print("    source ~/.config/fish/config.fish");
+  print("  Or use the full executable path:");
+  print("    " + join(USER_BIN, "toolsmith") + " status");
   if (setupConfig.security?.setup_token) {
-    print("Initial admin setup URL: http://" + setupHost + ":" + port + "/");
-    print("Initial setup token (keep it private): " + setupConfig.security.setup_token);
+    print("");
+    print("THEN: Complete initial administrator setup");
+    print("  1. Open this URL in your browser:");
+    print("     http://" + setupHost + ":" + port + "/");
+    print("  2. Enter this one-time setup token on the setup page:");
+    print("     " + setupConfig.security.setup_token);
+    print("  3. Create your administrator username and password.");
+    print("  The setup token is removed after the initial setup succeeds.");
+  } else {
+    print("");
+    print("Initial administrator setup is already completed or not required.");
   }
+  print("");
+  print("Installation finished.");
+  print("Then run: toolsmith status");
 }
 async function update() {
   ensureLinux();
