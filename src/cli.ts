@@ -133,7 +133,7 @@ async function writeConfig() {
 }
 async function installSource(sourceDir: string) {
   await mkdir(APP, { recursive: true });
-  for (const name of ["src", "package.json", "bun.lock", "tsconfig.json"]) {
+  for (const name of ["src", "package.json", "bun.lock", "tsconfig.json", "vite.config.ts"]) {
     const from = join(sourceDir, name);
     if (!existsSync(from))
       throw new Error("Missing " + name + " in source directory " + sourceDir);
@@ -142,10 +142,12 @@ async function installSource(sourceDir: string) {
   }
   await writeConfig();
   await rm(join(APP, "dist"), { recursive: true, force: true });
-  print("Installing production dependencies...");
-  run(BUN_BIN, ["install", "--production", "--frozen-lockfile"], { cwd: APP });
+  print("Installing build dependencies...");
+  run(BUN_BIN, ["install", "--frozen-lockfile"], { cwd: APP });
   print("Building Toolsmith...");
   run(BUN_BIN, ["run", "build"], { cwd: APP });
+  print("Pruning development dependencies...");
+  run(BUN_BIN, ["install", "--production", "--frozen-lockfile"], { cwd: APP });
 }
 async function installLauncher() {
   await mkdir(BIN, { recursive: true });
