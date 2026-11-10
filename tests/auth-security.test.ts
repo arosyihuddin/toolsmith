@@ -25,6 +25,30 @@ describe("administrator request security helpers", () => {
     expect(isSameOriginRequest(request)).toBe(true);
     expect(isSecureRequest(request)).toBe(true);
   });
+  test("uses the configured public origin when a reverse proxy forwards only an internal loopback host", () => {
+    const request = new Request("http://127.0.0.1:48766/oauth/authorize", {
+      method: "POST",
+      headers: {
+        host: "127.0.0.1:48766",
+        "cf-visitor": JSON.stringify({ scheme: "https" }),
+        origin: "https://toolsmith.example.com",
+      },
+    });
+    expect(requestOrigin(request, "https://toolsmith.example.com")).toBe("https://toolsmith.example.com");
+    expect(isSameOriginRequest(request, "https://toolsmith.example.com")).toBe(true);
+  });
+
+  test("still rejects foreign origins when a public origin fallback is configured", () => {
+    const request = new Request("http://127.0.0.1:48766/oauth/authorize", {
+      method: "POST",
+      headers: {
+        host: "127.0.0.1:48766",
+        "cf-visitor": JSON.stringify({ scheme: "https" }),
+        origin: "https://attacker.example",
+      },
+    });
+    expect(isSameOriginRequest(request, "https://toolsmith.example.com")).toBe(false);
+  });
   test("matches direct Tailscale access even when reverse-proxy headers are present", () => {
     const request = new Request("http://100.100.199.119:48766/admin/login", {
       method: "POST",
