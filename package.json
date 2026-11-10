@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun run dist/index.js",
-    "dev": "bun run build:ui && bun --watch src/index.ts",
+    "start": "NODE_ENV=production bun run dist/index.js",
+    "dev": "bun run build:ui && NODE_ENV=development bun --watch src/index.ts",
     "build": "bun run build:ui && NODE_ENV=production bun build --target=bun --packages=external --outfile=dist/index.js src/index.ts && mkdir -p dist/migrations && cp -a src/control-plane/db/migrations/. dist/migrations/",
     "typecheck": "tsc --noEmit -p tsconfig.backend.json",
-    "test": "bun test",
+    "test": "NODE_ENV=test bun test",
     "cli": "bun run src/cli.ts",
     "build:ui": "bun x vite build",
     "check:ui": "bun x svelte-check --workspace . --tsconfig tsconfig.json"
