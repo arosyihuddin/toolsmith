@@ -74,10 +74,19 @@ async function writeSecrets(apiToken: string, sudoKey: string, username: string,
 
 const wantsJson = (request: Request) => request.headers.get("accept")?.includes("application/json") ?? false;
 
-async function uiShell(status = 200): Promise<Response> {
+async function uiShell(status = 200, oauthCsrfToken?: string, request?: Request): Promise<Response> {
   const file = Bun.file(join(process.cwd(), "dist", "ui", "200.html"));
   if (!(await file.exists())) return new Response("Toolsmith UI is not built. Run the production build first.", { status: 503, headers: { ...securityHeaders, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
-  return new Response(file, { status, headers: { ...securityHeaders, "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  let html = await file.text();
+  if (oauthCsrfToken) html = html.replace("</head>", `<meta name="toolsmith-oauth-csrf" content="${oauthCsrfToken}"></head>`);
+  const headers: Record<string, string> = { ...securityHeaders, "content-type": "text/html; charset=utf-8", "cache-control": "no-store" };
+  if (oauthCsrfToken) headers["set-cookie"] = oauthCsrfCookieValue(oauthCsrfToken, request);
+  return new Response(html, { status, headers });
+}
+
+const oauthCsrfCookie = "toolsmith_oauth_csrf";
+function oauthCsrfCookieValue(token: string, request?: Request) {
+  return oauthCsrfCookie + "=" + token + "; Path=/oauth/authorize; HttpOnly; SameSite=Strict; Max-Age=300" + (request && isSecureRequest(request) ? "; Secure" : "");
 }
 
 async function uiAsset(path: string): Promise<Response> {
@@ -306,11 +315,17 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
     if (!row || !JSON.parse(row.redirect_uris).includes(redirect)) return json({ error: "invalid_request", error_description: "Unknown client or redirect_uri." }, 400);
     if (url.searchParams.get("response_type") !== "code" || url.searchParams.get("code_challenge_method") !== "S256" || !url.searchParams.get("code_challenge")) return json({ error: "invalid_request", error_description: "Authorization code with PKCE S256 is required." }, 400);
     if (url.searchParams.get("resource") && url.searchParams.get("resource") !== resourceUrl!.href) return json({ error: "invalid_target" }, 400);
-    return uiShell();
+    const oauthCsrfToken = randomToken();
+    return uiShell(200, oauthCsrfToken, request);
   }
 
   if (path === "/oauth/authorize" && request.method === "POST") {
-    const sameOrigin = isSameOriginRequest(request);
+    const form = new URLSearchParams(await request.text());
+    const origin = request.headers.get("origin");
+    const csrfCookieToken = readCookie(request, oauthCsrfCookie);
+    const csrfFormToken = form.get("_oauth_csrf") ?? "";
+    const csrfTokenValid = Boolean(csrfCookieToken && csrfFormToken && safeEqual(csrfCookieToken, csrfFormToken));
+    const sameOrigin = origin === "null" ? csrfTokenValid : isSameOriginRequest(request) && csrfTokenValid;
     let refererOrigin: string | null = null;
     try {
       const referer = request.headers.get("referer");
@@ -331,6 +346,7 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
       method: request.method,
       path,
       outcome: sameOrigin ? "accepted" : "rejected",
+      csrfTokenValid,
       origin: request.headers.get("origin"),
       refererOrigin,
       host: request.headers.get("host"),
@@ -341,7 +357,6 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
       resolvedOrigin: requestOrigin(request),
     }, "OAuth authorization origin check");
     if (!sameOrigin) return json({ error: "Cross-origin request rejected" }, 403);
-    const form = new URLSearchParams(await request.text());
     const submittedUsername = form.get("username") ?? "";
     if (isLoginBlocked(request, submittedUsername)) return json({ error: "Too many login attempts. Try again in 15 minutes." }, 429, { "retry-after": String(LOGIN_WINDOW_SECONDS) });
     const clientId = form.get("client_id") ?? "", row = client(clientId);
