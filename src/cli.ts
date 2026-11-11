@@ -27,6 +27,7 @@ const WORKSPACE = join(ROOT, "workspace");
 const LOGS = join(ROOT, "logs");
 const CONFIG = join(ROOT, "config");
 const CONFIG_FILE = join(CONFIG, "config.yml");
+const INSTALL_METADATA = join(ROOT, "install.json");
 const LEGACY_ENV_FILE = join(CONFIG, ".env");
 const UNIT_DIR = join(HOME, ".config/systemd/user");
 const UNIT_FILE = join(UNIT_DIR, "toolsmith.service");
@@ -34,6 +35,7 @@ const USER_BIN = join(HOME, ".local/bin");
 const LAUNCHER = join(BIN, "toolsmith");
 const BUN_BIN = join(BIN, "bun");
 const REPOSITORY = "https://github.com/arosyihuddin/toolsmith.git";
+const RELEASE_API = "https://api.github.com/repos/arosyihuddin/toolsmith/releases/latest";
 const SERVICE = "toolsmith.service";
 const args = process.argv.slice(2);
 const command = args[0] ?? "help";
@@ -113,14 +115,14 @@ async function writeConfig() {
   const config = {
     server: { host: legacy.MCP_HTTP_HOST || "127.0.0.1", port, path: legacy.MCP_HTTP_PATH || "/mcp", transport: legacy.MCP_TRANSPORT || "http" },
     security: {
-      api_token: legacy.TOOLSMITH_API_TOKEN || legacy.OMP_API_TOKEN || randomBytes(32).toString("hex"),
-      sudo_encryption_key: legacy.TOOLSMITH_SUDO_ENCRYPTION_KEY || legacy.OMP_SUDO_ENCRYPTION_KEY || randomBytes(32).toString("hex"),
+      api_token: legacy.TOOLSMITH_API_TOKEN || randomBytes(32).toString("hex"),
+      sudo_encryption_key: legacy.TOOLSMITH_SUDO_ENCRYPTION_KEY || randomBytes(32).toString("hex"),
       setup_token: randomBytes(32).toString("base64url"),
     },
     oauth: {
       public_url: legacy.MCP_PUBLIC_URL || "",
-      username: legacy.TOOLSMITH_OAUTH_USERNAME || legacy.OMP_OAUTH_USERNAME || "toolsmith",
-      password: legacy.TOOLSMITH_OAUTH_PASSWORD || legacy.OMP_OAUTH_PASSWORD || "",
+      username: legacy.TOOLSMITH_OAUTH_USERNAME || "toolsmith",
+      password: legacy.TOOLSMITH_OAUTH_PASSWORD || "",
     },
     logging: { level: legacy.LOG_LEVEL || "info" },
   };
@@ -226,6 +228,50 @@ async function writeUnit() {
   systemctl("daemon-reload");
   systemctl("enable", SERVICE);
 }
+async function cloneSource(channel: "stable" | "nightly", destination: string) {
+  await rm(destination, { recursive: true, force: true });
+  let ref = "main";
+  let version: string | undefined;
+  if (channel === "stable") {
+    print("Checking latest stable GitHub Release...");
+    const response = await fetch(RELEASE_API, {
+      headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`Unable to fetch latest stable release (GitHub API: ${response.status}).`);
+    const release = await response.json() as { tag_name?: string; draft?: boolean; prerelease?: boolean };
+    if (!release.tag_name || release.draft || release.prerelease || !/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(release.tag_name)) {
+      throw new Error("GitHub returned an invalid or non-stable release tag.");
+    }
+    ref = release.tag_name;
+    version = ref.replace(/^v/, "");
+    print(`Downloading stable release ${ref}...`);
+  } else {
+    print("Fetching latest source from branch main (nightly)...");
+  }
+  run("git", ["clone", "--depth", "1", "--branch", ref, REPOSITORY, destination]);
+  if (version) {
+    const sourcePackage = JSON.parse(await readFile(join(destination, "package.json"), "utf8")) as { version?: string };
+    if (sourcePackage.version !== version) throw new Error(`Release tag ${ref} does not match package version ${sourcePackage.version ?? "unknown"}.`);
+  }
+  const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: destination, encoding: "utf8" });
+  if (revision.error || revision.status !== 0) throw revision.error ?? new Error("Unable to read source revision.");
+  const commit = revision.stdout.trim();
+  return { channel, ...(version ? { version } : {}), commit, ref };
+}
+
+async function writeInstallMetadata(metadata: { channel: string; version: string; commit: string; ref: string }) {
+  await writeFile(INSTALL_METADATA, JSON.stringify({ ...metadata, updatedAt: new Date().toISOString() }, null, 2) + "\n", { mode: 0o600 });
+}
+
+async function readInstallMetadata() {
+  try {
+    return JSON.parse(await readFile(INSTALL_METADATA, "utf8")) as { channel?: string; version?: string; commit?: string; ref?: string };
+  } catch {
+    return undefined;
+  }
+}
+
 async function bootstrap(sourceDir?: string) {
   ensureLinux();
   for (const dir of [ROOT, BIN, DATA, WORKSPACE, LOGS, CONFIG])
@@ -238,15 +284,19 @@ async function bootstrap(sourceDir?: string) {
     existsSync(join(source, "package.json")) &&
     JSON.parse(await readFile(join(source, "package.json"), "utf8")).name ===
       "toolsmith";
+  const temp = join(ROOT, ".source-update");
+  let metadata: { channel: string; version: string; commit: string; ref: string };
   if (isToolsmithSource) {
+    const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: source, encoding: "utf8" });
+    metadata = { channel: "local", version: JSON.parse(await readFile(join(source, "package.json"), "utf8")).version, commit: revision.status === 0 ? revision.stdout.trim() : "unknown", ref: "local" };
     await installSource(source);
   } else {
-    const temp = join(ROOT, ".source-update");
-    await rm(temp, { recursive: true, force: true });
-    run("git", ["clone", "--depth", "1", "--branch", "main", REPOSITORY, temp]);
+    const sourceMetadata = await cloneSource("stable", temp);
     await installSource(temp);
+    metadata = { ...sourceMetadata, version: JSON.parse(await readFile(join(APP, "package.json"), "utf8")).version };
     await rm(temp, { recursive: true, force: true });
   }
+  await writeInstallMetadata(metadata);
   await writeUnit();
   systemctl("start", SERVICE);
   const installedConfig = parse(await readFile(CONFIG_FILE, "utf8")) as { server?: { host?: string; port?: number } };
@@ -284,20 +334,22 @@ async function bootstrap(sourceDir?: string) {
   print("Installation finished.");
   print("Then run: toolsmith status");
 }
-async function update() {
+async function update(channel: "stable" | "nightly") {
   ensureLinux();
   if (!existsSync(APP))
     throw new Error("Toolsmith is not installed. Run: toolsmith install");
   const temp = join(ROOT, ".source-update");
-  await rm(temp, { recursive: true, force: true });
-  print("Fetching latest Toolsmith source...");
-  run("git", ["clone", "--depth", "1", "--branch", "main", REPOSITORY, temp]);
-  await installSource(temp);
-  await rm(temp, { recursive: true, force: true });
+  const sourceMetadata = await cloneSource(channel, temp);
+  try {
+    await installSource(temp);
+    const version = JSON.parse(await readFile(join(APP, "package.json"), "utf8")).version as string;
+    await writeInstallMetadata({ ...sourceMetadata, version });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
   systemctl("restart", SERVICE);
-  print(
-    "Updated and restarted. Existing configuration and data were preserved.",
-  );
+  print(`Updated to ${channel === "stable" ? "stable release " + sourceMetadata.ref : "nightly " + sourceMetadata.commit.slice(0, 7)} and restarted.`);
+  print("Existing configuration and data were preserved.");
 }
 
 async function promptHidden(label: string): Promise<string> {
@@ -404,7 +456,7 @@ async function uninstall(purge: boolean) {
 }
 function help() {
   console.log(
-    "Toolsmith CLI\n\nUsage:\n  toolsmith install [source-directory]\n  toolsmith update\n  toolsmith start\n  toolsmith stop\n  toolsmith restart\n  toolsmith status\n  toolsmith logs\n  toolsmith setup-token\n  toolsmith reset-password\n  toolsmith uninstall [--purge]\n  toolsmith version\n  toolsmith help\n\nThe setup-token command generates a one-time token when initial setup needs to be completed.\nAdmin password reset runs locally in an interactive terminal and revokes existing admin sessions.\nInstall uses ~/.toolsmith and a systemd user service; no sudo required.",
+    "Toolsmith CLI\n\nUsage:\n  toolsmith install [source-directory]\n  toolsmith update [--nightly]\n  toolsmith start\n  toolsmith stop\n  toolsmith restart\n  toolsmith status\n  toolsmith logs\n  toolsmith setup-token\n  toolsmith reset-password\n  toolsmith uninstall [--purge]\n  toolsmith version\n  toolsmith help\n\nThe setup-token command generates a one-time token when initial setup needs to be completed.\nAdmin password reset runs locally in an interactive terminal and revokes existing admin sessions.\nInstall uses ~/.toolsmith and a systemd user service; no sudo required.",
   );
 }
 try {
@@ -413,7 +465,9 @@ try {
       await bootstrap(args[1]);
       break;
     case "update":
-      await update();
+      if (args.slice(1).some((arg) => arg !== "--nightly")) throw new Error("Usage: toolsmith update [--nightly]");
+      if (args.slice(1).filter((arg) => arg === "--nightly").length > 1) throw new Error("Usage: toolsmith update [--nightly]");
+      await update(args.includes("--nightly") ? "nightly" : "stable");
       break;
     case "start":
       systemctl("start", SERVICE);
@@ -424,9 +478,14 @@ try {
     case "restart":
       systemctl("restart", SERVICE);
       break;
-    case "status":
+    case "status": {
+      const metadata = await readInstallMetadata();
+      const pkg = JSON.parse(await readFile(join(APP, "package.json"), "utf8")) as { version: string };
+      console.log(`Toolsmith ${pkg.version} (${metadata?.channel ?? "unknown"})`);
+      if (metadata?.commit) console.log(`Commit: ${metadata.commit.slice(0, 7)}`);
       systemctl("status", SERVICE);
       break;
+    }
     case "logs":
       run("journalctl", ["--user", "-u", SERVICE, "-f"]);
       break;
@@ -440,8 +499,10 @@ try {
       await uninstall(args.includes("--purge"));
       break;
     case "version": {
-      const pkg = JSON.parse(await readFile(join(APP, "package.json"), "utf8"));
-      console.log("Toolsmith " + pkg.version);
+      const pkg = JSON.parse(await readFile(join(APP, "package.json"), "utf8")) as { version: string };
+      const metadata = await readInstallMetadata();
+      console.log(`Toolsmith ${pkg.version} (${metadata?.channel ?? "unknown"})`);
+      if (metadata?.commit) console.log(`Commit: ${metadata.commit.slice(0, 7)}`);
       break;
     }
     case "help":

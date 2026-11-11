@@ -35,7 +35,11 @@ After installation, manage Toolsmith with:
     toolsmith logs
     toolsmith restart
     toolsmith update
+    toolsmith update --nightly
+    toolsmith version
     toolsmith uninstall
+
+`toolsmith update` installs the latest official, non-prerelease GitHub Release (stable channel). `toolsmith update --nightly` installs the latest commit from the `main` branch and may include unfinished changes. `toolsmith version` and `toolsmith status` show the installed version, channel, and source commit. A normal installation starts on the stable channel; installing from a local source directory is marked as `local`.
 
 Uninstall preserves configuration and user data. Use `toolsmith uninstall --purge` only when you also want to delete all of `~/.toolsmith/`. The service runs as a systemd user service; enable lingering separately if it must stay active after logout.
 
@@ -66,12 +70,12 @@ Development runs read `config.yml` from the repository root. Installed productio
 
 | Variable | Purpose |
 | --- | --- |
-| TOOLSMITH_API_TOKEN | Internal HTTP/control API Bearer token; legacy fallback OMP_API_TOKEN. |
-| TOOLSMITH_DEFAULT_CWD | Default workspace; legacy fallback OMP_DEFAULT_CWD. |
-| TOOLSMITH_DATA_DIR | Control-plane database directory; legacy fallback OMP_DATA_DIR. |
-| TOOLSMITH_SUDO_ENCRYPTION_KEY | Stable secret of at least 32 characters; legacy fallback OMP_SUDO_ENCRYPTION_KEY. Preserve the existing key when migrating encrypted data. |
+| TOOLSMITH_API_TOKEN | Internal HTTP/control API Bearer token. |
+| TOOLSMITH_DEFAULT_CWD | Default workspace. |
+| TOOLSMITH_DATA_DIR | Control-plane database directory. |
+| TOOLSMITH_SUDO_ENCRYPTION_KEY | Stable secret of at least 32 characters. Keep this key unchanged while encrypted root-command credentials exist. |
 | Admin account | Created through the built-in Toolsmith Initial Setup UI; password is stored as a scrypt hash. |
-| TOOLSMITH_TERMINAL_ROOT | Root for relative terminal paths; legacy fallback OMP_TERMINAL_ROOT. |
+| TOOLSMITH_TERMINAL_ROOT | Root for relative terminal paths. |
 | MCP_PUBLIC_URL | Public HTTPS origin for OAuth discovery and callbacks; configured during Initial Setup or in config.yml. Unset disables remote OAuth. |
 | LOG_LEVEL | Log level; defaults to info. |
 
@@ -114,9 +118,9 @@ A configured working directory is a default cwd, not a filesystem or process san
 
 The dashboard frontend lives in the separate toolsmith-console project and consumes authenticated /api/* endpoints. Update and test both repositories when API contracts change.
 
-## Legacy system installation
+## Deployment
 
-The previous system-wide Makefile workflow is archived at `deploy/Makefile.legacy`; templates under `deploy/systemd/` are retained for compatibility with existing hosts. New installations should use the per-user CLI workflow above. Do not run the legacy `make install`, `make update`, `make uninstall`, or `make purge` targets on a host that has an existing Toolsmith/OMP-MCP system service without a planned migration and backup. The CLI installer does not migrate or modify `/opt/omp-mcp`, `/opt/toolsmith`, `/var/lib/omp-mcp`, `/var/lib/toolsmith`, or their system services.
+Install and manage Toolsmith with the per-user CLI workflow. It stores the application, configuration, database, workspace, and logs under `~/.toolsmith` and manages `toolsmith.service` through the systemd user manager.
 
 ## Engineering rules
 

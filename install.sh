@@ -54,7 +54,14 @@ info "Downloading Toolsmith ($BRANCH)..."
 git clone --quiet --depth 1 --branch "$BRANCH" "$REPOSITORY" "$TMP_ROOT/toolsmith"
 
 info "Starting per-user installation..."
-bun run "$TMP_ROOT/toolsmith/src/cli.ts" install "$TMP_ROOT/toolsmith"
+if [[ "$BRANCH" == "main" ]]; then
+  # The bootstrap CLI itself comes from main, but the installed application
+  # starts from the latest official stable GitHub Release.
+  (cd "$TMP_ROOT" && bun run "$TMP_ROOT/toolsmith/src/cli.ts" install)
+else
+  # Explicit branch overrides are development installs from that source tree.
+  bun run "$TMP_ROOT/toolsmith/src/cli.ts" install "$TMP_ROOT/toolsmith"
+fi
 
 info "Installation finished."
 SHELL_NAME="${SHELL##*/}"
