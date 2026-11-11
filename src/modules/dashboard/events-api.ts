@@ -1,3 +1,4 @@
+import os from "node:os";
 import { subscribeDashboardEvents } from "./events";
 import { getProcessSnapshots } from "../process";
 import { config } from "../../lib/config";
@@ -55,6 +56,7 @@ async function getDashboardTelemetry(): Promise<unknown> {
         display: cached.display,
         runtime: cached.runtime,
         network: cached.network,
+        uptime_seconds: os.uptime(),
       },
       service: {
         transport: config.transport,
