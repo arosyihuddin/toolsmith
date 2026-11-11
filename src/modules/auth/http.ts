@@ -25,7 +25,7 @@ const securityHeaders = { "x-content-type-options": "nosniff", "x-frame-options"
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(data, { status, headers: { ...securityHeaders, "cache-control": "no-store", pragma: "no-cache", ...headers } });
 function oauthEnabled(request?: Request) { const { issuer, resourceUrl } = oauthConfig(request); return Boolean(issuer && issuer.protocol === "https:" && issuer.pathname === "/" && !issuer.search && !issuer.hash && resourceUrl); }
 
-sqlite.exec(`CREATE TABLE IF NOT EXISTS toolsmith_admin (id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL UNIQUE, salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_login_attempts (subject_hash TEXT PRIMARY KEY, attempts INTEGER NOT NULL, window_started_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL DEFAULT 0);`);
+sqlite.exec(`CREATE TABLE IF NOT EXISTS toolsmith_admin (id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL UNIQUE, salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_login_attempts (subject_hash TEXT PRIMARY KEY, attempts INTEGER NOT NULL, window_started_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS oauth_authorize_csrf (token_hash TEXT PRIMARY KEY, request_hash TEXT NOT NULL, expires_at INTEGER NOT NULL);`);
 const sessionCookie = "toolsmith_session";
 function adminConfigured() { return Boolean(sqlite.query("SELECT id FROM toolsmith_admin WHERE id = 1").get()); }
 function passwordHash(password: string, salt: Buffer) { return scryptSync(password, salt, 64).toString("hex"); }
@@ -74,19 +74,18 @@ async function writeSecrets(apiToken: string, sudoKey: string, username: string,
 
 const wantsJson = (request: Request) => request.headers.get("accept")?.includes("application/json") ?? false;
 
-async function uiShell(status = 200, oauthCsrfToken?: string, request?: Request): Promise<Response> {
+async function uiShell(status = 200, oauthCsrfToken?: string): Promise<Response> {
   const file = Bun.file(join(process.cwd(), "dist", "ui", "200.html"));
   if (!(await file.exists())) return new Response("Toolsmith UI is not built. Run the production build first.", { status: 503, headers: { ...securityHeaders, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   let html = await file.text();
   if (oauthCsrfToken) html = html.replace("</head>", `<meta name="toolsmith-oauth-csrf" content="${oauthCsrfToken}"></head>`);
   const headers: Record<string, string> = { ...securityHeaders, "content-type": "text/html; charset=utf-8", "cache-control": "no-store" };
-  if (oauthCsrfToken) headers["set-cookie"] = oauthCsrfCookieValue(oauthCsrfToken, request);
   return new Response(html, { status, headers });
 }
 
-const oauthCsrfCookie = "toolsmith_oauth_csrf";
-function oauthCsrfCookieValue(token: string, request?: Request) {
-  return oauthCsrfCookie + "=" + token + "; Path=/oauth/authorize; HttpOnly; SameSite=Strict; Max-Age=300" + (request && isSecureRequest(request) ? "; Secure" : "");
+const oauthAuthorizeCsrfLifetime = 300;
+function oauthAuthorizeRequestHash(params: URLSearchParams) {
+  return hash(JSON.stringify(["client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "resource", "state", "scope"].map((key) => params.get(key))));
 }
 
 async function uiAsset(path: string): Promise<Response> {
@@ -316,15 +315,23 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
     if (url.searchParams.get("response_type") !== "code" || url.searchParams.get("code_challenge_method") !== "S256" || !url.searchParams.get("code_challenge")) return json({ error: "invalid_request", error_description: "Authorization code with PKCE S256 is required." }, 400);
     if (url.searchParams.get("resource") && url.searchParams.get("resource") !== resourceUrl!.href) return json({ error: "invalid_target" }, 400);
     const oauthCsrfToken = randomToken();
-    return uiShell(200, oauthCsrfToken, request);
+    const authorizeParams = new URLSearchParams(url.search);
+    sqlite.query("DELETE FROM oauth_authorize_csrf WHERE expires_at <= ?").run(now());
+    const csrfTokenHash = hash(oauthCsrfToken);
+    sqlite.query("INSERT INTO oauth_authorize_csrf (token_hash, request_hash, expires_at) VALUES (?, ?, ?)").run(csrfTokenHash, oauthAuthorizeRequestHash(authorizeParams), now() + oauthAuthorizeCsrfLifetime);
+    logger.info({ event: "oauth_authorize_csrf_issued", pid: process.pid, tokenFingerprint: csrfTokenHash.slice(0, 12), stored: Boolean(sqlite.query("SELECT token_hash FROM oauth_authorize_csrf WHERE token_hash = ?").get(csrfTokenHash)) }, "OAuth authorization CSRF token issued");
+    return uiShell(200, oauthCsrfToken);
   }
 
   if (path === "/oauth/authorize" && request.method === "POST") {
     const form = new URLSearchParams(await request.text());
     const origin = request.headers.get("origin");
-    const csrfCookieToken = readCookie(request, oauthCsrfCookie);
     const csrfFormToken = form.get("_oauth_csrf") ?? "";
-    const csrfTokenValid = Boolean(csrfCookieToken && csrfFormToken && safeEqual(csrfCookieToken, csrfFormToken));
+    const csrfTokenHash = csrfFormToken ? hash(csrfFormToken) : "";
+    const csrfRecord = csrfFormToken ? sqlite.query("SELECT request_hash FROM oauth_authorize_csrf WHERE token_hash = ? AND expires_at > ?").get(csrfTokenHash, now()) as { request_hash: string } | null : null;
+    const csrfRequestHashMatches = Boolean(csrfRecord && safeEqual(csrfRecord.request_hash, oauthAuthorizeRequestHash(form)));
+    const csrfTokenValid = Boolean(csrfFormToken && csrfRecord && csrfRequestHashMatches);
+    logger.info({ event: "oauth_authorize_csrf_received", pid: process.pid, tokenFingerprint: csrfTokenHash ? csrfTokenHash.slice(0, 12) : null, recordFound: Boolean(csrfRecord) }, "OAuth authorization CSRF token received");
     const sameOrigin = origin === "null" ? csrfTokenValid : isSameOriginRequest(request) && csrfTokenValid;
     let refererOrigin: string | null = null;
     try {
@@ -356,7 +363,10 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
       requestUrlOrigin,
       resolvedOrigin: requestOrigin(request),
     }, "OAuth authorization origin check");
-    if (!sameOrigin) return json({ error: "Cross-origin request rejected" }, 403);
+    if (!sameOrigin) {
+      logger.warn({ event: "oauth_authorize_rejected", csrfTokenPresent: Boolean(csrfFormToken), csrfRecordFound: Boolean(csrfRecord), csrfRequestHashMatches, csrfTokenValid, origin, refererOrigin, requestUrlOrigin, resolvedOrigin: requestOrigin(request) }, "OAuth authorization rejected by origin/CSRF protection");
+      return json({ error: "Cross-origin request rejected" }, 403);
+    }
     const submittedUsername = form.get("username") ?? "";
     if (isLoginBlocked(request, submittedUsername)) return json({ error: "Too many login attempts. Try again in 15 minutes." }, 429, { "retry-after": String(LOGIN_WINDOW_SECONDS) });
     const clientId = form.get("client_id") ?? "", row = client(clientId);
@@ -371,6 +381,7 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
       failedUrl.searchParams.set("error", "invalid_credentials");
       return Response.redirect(failedUrl.href, 303);
     }
+    sqlite.query("DELETE FROM oauth_authorize_csrf WHERE token_hash = ?").run(csrfTokenHash);
     clearLoginFailures(request, form.get("username") ?? "");
     const resource = form.get("resource") || resourceUrl!.href;
     if (resource !== resourceUrl!.href) return json({ error: "invalid_target" }, 400);

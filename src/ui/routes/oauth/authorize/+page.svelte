@@ -8,12 +8,14 @@
   let username = $state("");
   let password = $state("");
   let csrfToken = $state("");
+  let usernameInput: HTMLInputElement;
 
   onMount(() => {
     const query = new URLSearchParams(window.location.search);
     params = [...query.entries()].filter(([key]) => key !== "error");
     csrfToken = document.querySelector('meta[name="toolsmith-oauth-csrf"]')?.getAttribute("content") ?? "";
     if (query.get("error") === "invalid_credentials") error = "Username atau password salah.";
+    usernameInput?.focus();
   });
 
 </script>
@@ -34,7 +36,7 @@
         <form method="POST" action="/oauth/authorize" class="space-y-5">
           {#each params as [key,value]}<input type="hidden" name={key} value={value}/>{/each}
           <input type="hidden" name="_oauth_csrf" value={csrfToken}/>
-          <div><label for="oauth-username" class="mb-2 block text-sm font-medium">Username</label><input id="oauth-username" name="username" bind:value={username} required autocomplete="username" autocapitalize="none" spellcheck="false" class="w-full rounded-lg border border-line bg-surface px-3.5 py-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10" placeholder="Masukkan username"/></div>
+          <div><label for="oauth-username" class="mb-2 block text-sm font-medium">Username</label><input bind:this={usernameInput} id="oauth-username" name="username" bind:value={username} required autocomplete="username" autocapitalize="none" spellcheck="false" class="w-full rounded-lg border border-line bg-surface px-3.5 py-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10" placeholder="Masukkan username"/></div>
           <div><label for="oauth-password" class="mb-2 block text-sm font-medium">Password</label><div class="flex items-center rounded-lg border border-line bg-surface transition focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/10"><input id="oauth-password" name="password" bind:value={password} required type={showPassword?"text":"password"} autocomplete="current-password" class="min-w-0 flex-1 rounded-lg bg-transparent px-3.5 py-3 text-sm outline-none focus-visible:ring-0" placeholder="Masukkan password"/><button type="button" class="mr-1.5 grid h-8 w-8 place-items-center rounded-md text-fg-subtle hover:bg-surface-hover hover:text-fg" aria-label={showPassword?"Sembunyikan password":"Tampilkan password"} onclick={()=>showPassword=!showPassword}><svg viewBox="0 0 24 24" class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"/><circle cx="12" cy="12" r="2.5"/></svg></button></div></div>
           {#if error}<p class="rounded-lg border border-danger/20 bg-danger/5 px-3 py-2.5 text-sm text-danger" role="alert">{error}</p>{/if}
           <button type="submit" class="w-full rounded-lg bg-accent px-4 py-3 text-sm font-medium text-accent-fg transition hover:bg-accent-hover">Authorize connection</button>
