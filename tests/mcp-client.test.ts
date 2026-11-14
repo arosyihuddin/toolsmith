@@ -68,7 +68,7 @@ describe("MCP Streamable HTTP integration", () => {
   test("rejects missing and invalid Bearer tokens", async () => {
     const missing = await fetch(endpoint, { method: "GET" });
     expect(missing.status).toBe(401);
-    expect(missing.headers.get("www-authenticate")).toBe("Bearer");
+    expect(missing.headers.get("www-authenticate")).toBe('Bearer resource_metadata="http://127.0.0.1:3101/.well-known/oauth-protected-resource/mcp"');
 
     const invalid = await fetch(endpoint, {
       method: "POST",
