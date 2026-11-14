@@ -10,3 +10,4 @@ dist/
 config.yml
 config.yaml
 .test-data/
+dist-release/
