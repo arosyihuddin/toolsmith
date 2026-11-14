@@ -88,7 +88,6 @@ describe("MCP Streamable HTTP integration", () => {
       expect(names).toContain("read");
       expect(names).toContain("bash");
       expect(names).toContain("write");
-      expect(names).not.toContain("omp_read");
     } finally {
       await transport.close();
     }

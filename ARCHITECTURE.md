@@ -55,7 +55,6 @@ toolsmith/
 │   │   └── static/
 │   └── lib/                      # utilitas lintas domain yang kecil dan stabil
 ├── tests/
-├── deploy/
 ├── ARCHITECTURE.md
 ├── README.md
 └── package.json
@@ -196,9 +195,8 @@ Aturan tambahan:
 ### Environment
 
 - `src/lib/config.ts` adalah titik konfigurasi terpusat untuk environment aplikasi.
-- Variabel `TOOLSMITH_*` diutamakan untuk konfigurasi baru.
-- Alias `OMP_*` masih menjadi bagian dari batas kompatibilitas. Jangan menghapus alias atau mengganti data path, encryption key, maupun service unit tanpa migrasi yang diuji.
-- Direktori data baru adalah `/var/lib/toolsmith`; fallback otomatis ke `/var/lib/omp-mcp` dipertahankan jika direktori lama ada dan direktori baru belum ada.
+- Konfigurasi aplikasi menggunakan variabel `TOOLSMITH_*` dan konfigurasi MCP yang didokumentasikan di README.md.
+- Direktori data produksi menggunakan `/var/lib/toolsmith` kecuali `TOOLSMITH_DATA_DIR` ditentukan.
 - Secret hanya berasal dari environment atau secret manager, bukan source code.
 - Perubahan encryption key dapat membuat data terenkripsi lama tidak dapat dibaca; jangan merotasinya tanpa rencana migrasi.
 - Variabel environment yang didokumentasikan harus benar-benar digunakan; hapus variabel yang tidak terpakai hanya setelah memastikan tidak dibutuhkan oleh deployment.
@@ -248,8 +246,7 @@ Setiap tahap harus mempertahankan perilaku yang tidak sedang sengaja diubah. Jan
 
 ## 12. Batas deployment dan kompatibilitas
 
-- Deployment baru menggunakan `/opt/toolsmith`, `/var/lib/toolsmith`, dan `toolsmith.service`; deteksi kompatibilitas mempertahankan direktori legacy `/opt/omp-mcp` dan `/var/lib/omp-mcp` bila ditemukan.
-- Migrasi systemd dari `omp-mcp.service` ke `toolsmith.service` harus dilakukan dalam maintenance window. Jangan menjalankan kedua unit bersamaan pada port yang sama.
+- Instalasi yang didukung menggunakan CLI per-user, direktori `~/.toolsmith`, dan `toolsmith.service` pada systemd user manager.
 - Jangan menjalankan target install/update/uninstall/purge, perintah systemd, migration produksi, atau deployment sebagai bagian dari pengujian lokal.
 - Validasi migrasi deployment di lingkungan non-produksi dan siapkan rollback sebelum menyentuh instalasi yang sudah berjalan.
 

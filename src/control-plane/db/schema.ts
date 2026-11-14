@@ -89,3 +89,33 @@ export const toolPermissionGroups = sqliteTable("tool_permission_groups", {
   customRule: text("custom_rule").notNull().default("approval"),
   updatedAt: text("updated_at").notNull(),
 });
+export const oauthClients = sqliteTable("oauth_clients", {
+  clientId: text("client_id").primaryKey(),
+  clientName: text("client_name").notNull(),
+  redirectUris: text("redirect_uris").notNull(),
+  grantTypes: text("grant_types").notNull(),
+  responseTypes: text("response_types").notNull(),
+  tokenEndpointAuthMethod: text("token_endpoint_auth_method").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const oauthCodes = sqliteTable("oauth_codes", {
+  codeHash: text("code_hash").primaryKey(),
+  clientId: text("client_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  state: text("state"),
+  scopes: text("scopes").notNull(),
+  resource: text("resource").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+});
+
+export const oauthTokens = sqliteTable("oauth_tokens", {
+  tokenHash: text("token_hash").primaryKey(),
+  clientId: text("client_id").notNull(),
+  tokenType: text("token_type").notNull(),
+  scopes: text("scopes").notNull(),
+  resource: text("resource").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull(),
+});

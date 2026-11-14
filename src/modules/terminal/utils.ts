@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { resolve, relative, sep } from "node:path";
 
 const MAX_BUFFER = 256 * 1024;
-const TERMINAL_ROOT = resolve(process.env.TOOLSMITH_TERMINAL_ROOT ?? process.env.OMP_TERMINAL_ROOT ?? homedir());
+const TERMINAL_ROOT = resolve(process.env.TOOLSMITH_TERMINAL_ROOT ?? homedir());
 
 export function workspaceCwd(input?: string) {
   const root = TERMINAL_ROOT;

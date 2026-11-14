@@ -16,11 +16,11 @@ test("keeps an existing absolute working directory absolute", async () => {
 });
 
 test("resolves relative paths from the home directory when they exist there", async () => {
-  temporaryDirectory = await mkdtemp(join(homedir(), "omp-cwd-resolution-"));
+  temporaryDirectory = await mkdtemp(join(homedir(), "toolsmith-cwd-resolution-"));
   expect(await resolveWorkingDirectory(basename(temporaryDirectory))).toBe(temporaryDirectory);
 });
 
 test("reports a clear error when the directory does not exist", async () => {
-  await expect(resolveWorkingDirectory("omp-cwd-path-that-does-not-exist-123456"))
+  await expect(resolveWorkingDirectory("toolsmith-cwd-path-that-does-not-exist-123456"))
     .rejects.toThrow("Working directory does not exist or is not a directory");
 });

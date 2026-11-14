@@ -128,9 +128,6 @@ describe("MCP Streamable HTTP tool coverage", () => {
 
       expect(names.size).toBe(expected.length);
 
-      for (const name of ["omp_run", "omp_collab", "omp_status", "omp_result", "omp_resume", "omp_interrupt", "omp_dispose", "omp_list"]) {
-        expect(names.has(name)).toBe(false);
-      }
     } finally {
       await transport.close();
     }
@@ -149,7 +146,7 @@ describe("MCP Streamable HTTP tool coverage", () => {
       const fsFind = await callTool(client, "fs_find", { pattern: "package.json", path: root });
       expect(fsFind.isError).not.toBe(true);
 
-      const fsGrep = await callTool(client, "fs_grep", { pattern: "omp-mcp", path: root, glob: "package.json" });
+      const fsGrep = await callTool(client, "fs_grep", { pattern: "toolsmith", path: root, glob: "package.json" });
       expect(fsGrep.isError).not.toBe(true);
 
       const liteFind = await callTool(client, "find", { pattern: "package.json", path: ".", type: "file", max_results: 10 });

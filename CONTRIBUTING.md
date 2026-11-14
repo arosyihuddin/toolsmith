@@ -10,7 +10,6 @@
 ## Requirements and local development
 
 - Bun 1.4 or later.
-- OMP 18.4.10 or a compatible runtime exposing the APIs this project uses.
 - An authenticated compatible runtime/model environment for runtime integration checks.
 - Linux for the recommended systemd deployment and host operations.
 
@@ -56,7 +55,7 @@ Add or update tests for changes to tool registration, policy evaluation, authent
 - Persist durable control-plane state in the SQLite schema using Drizzle.
 - Add a migration for schema changes and ensure it is applied by the existing startup migration flow.
 - Do not rely on manually editing deployed databases.
-- Document new configuration keys in config.example.yml and README.md. Keep legacy environment-variable compatibility documented where it remains supported.
+- Document new configuration keys in config.example.yml and README.md. Document every supported environment variable in README.md and config.example.yml.
 
 ## Host operations and security
 

@@ -19,12 +19,10 @@ type StoredRootConfig = {
 const KEY = "root-command-config";
 
 function encryptionKey(): Buffer {
-  const value =
-    process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY ??
-    process.env.OMP_SUDO_ENCRYPTION_KEY;
+  const value = process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY;
   if (!value || value.length < 32)
     throw new Error(
-      "TOOLSMITH_SUDO_ENCRYPTION_KEY (atau OMP_SUDO_ENCRYPTION_KEY lama) harus diatur (minimal 32 karakter) sebelum menyimpan password sudo.",
+      "TOOLSMITH_SUDO_ENCRYPTION_KEY harus diatur (minimal 32 karakter) sebelum menyimpan password sudo.",
     );
   return Buffer.from(value, "utf8").subarray(0, 32);
 }
@@ -89,32 +87,6 @@ function readStored(): StoredRootConfig {
           ? { encryptedPassword: parsed.encryptedPassword }
           : {}),
       });
-    }
-    const oldDefaults = [
-      ["status", "omp-mcp"],
-      ["restart", "omp-mcp"],
-      ["status", "omp-mcp-browser-relay"],
-      ["restart", "omp-mcp-browser-relay"],
-      ["status", "ydotoold"],
-      ["restart", "ydotoold"],
-    ];
-    const isOldSeed =
-      rules.length === oldDefaults.length &&
-      rules.every(
-        (rule, index) =>
-          basename(rule.command) === "systemctl" &&
-          JSON.stringify(rule.args) === JSON.stringify(oldDefaults[index]) &&
-          rule.enabled === false,
-      );
-    if (isOldSeed) {
-      const migrated = {
-        rules: defaultRules(),
-        ...(parsed.encryptedPassword
-          ? { encryptedPassword: parsed.encryptedPassword }
-          : {}),
-      };
-      writeStored(migrated);
-      return migrated;
     }
     return {
       rules,
@@ -194,9 +166,7 @@ function resolveTrustedCommand(input: string): string {
 }
 export function getRootCommandConfig() {
   const value = readStored();
-  const key =
-    process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY ??
-    process.env.OMP_SUDO_ENCRYPTION_KEY;
+  const key = process.env.TOOLSMITH_SUDO_ENCRYPTION_KEY;
   return {
     rules: value.rules,
     passwordConfigured: Boolean(value.encryptedPassword),

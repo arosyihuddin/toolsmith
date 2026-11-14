@@ -5,8 +5,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 let handle: (request: Request) => Promise<Response>;
-const sandbox = `.omp-test-${process.pid}`;
-const dataDir = mkdtempSync(join(tmpdir(), "omp-db-"));
+const sandbox = `.toolsmith-test-${process.pid}`;
+const dataDir = mkdtempSync(join(tmpdir(), "toolsmith-db-"));
 
 const call = async (method: string, path: string, body?: unknown) => {
   const response = await handle(
@@ -82,7 +82,7 @@ describe("workspace api", () => {
   });
 
   test("absolute filesystem paths stay absolute across file operations", async () => {
-    const rootPath = join(tmpdir(), `omp-absolute-test-${process.pid}`);
+    const rootPath = join(tmpdir(), `toolsmith-absolute-test-${process.pid}`);
     const file = `${rootPath}/a.txt`;
     expect((await call("POST", "/api/workspace/create", { path: rootPath, type: "directory" })).data.path).toBe(rootPath);
     expect((await call("POST", "/api/workspace/create", { path: file, type: "file" })).data.path).toBe(file);

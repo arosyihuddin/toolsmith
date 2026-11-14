@@ -2,7 +2,7 @@
 
 ## Scope
 
-Toolsmith is a runtime/server project, not the Toolsmith Console dashboard frontend. The full dashboard UI lives in the separate OMP-Control repository. This guide applies to user-facing interfaces that Toolsmith itself serves or exposes, such as the OAuth authorization/login page, and to the shape and consistency of its API responses.
+Toolsmith is a runtime/server project, not the Toolsmith Console dashboard frontend. The full dashboard UI lives in the separate toolsmith-console repository. This guide applies to user-facing interfaces that Toolsmith itself serves or exposes, such as the OAuth authorization/login page, and to the shape and consistency of its API responses.
 
 ## Interface principles
 
@@ -40,8 +40,8 @@ Toolsmith is a runtime/server project, not the Toolsmith Console dashboard front
 ## Ownership
 
 - Toolsmith owns the runtime tool catalog, tool execution enforcement, custom permission rules, approval state, host operations, terminals, and tunnel lifecycle.
-- OMP-Control consumes Toolsmith APIs and presents those controls in the dashboard.
-- Shared visual changes to the Toolsmith Console dashboard should be made in the OMP-Control repository and follow its `DESIGN.md`.
+- Toolsmith Console consumes Toolsmith APIs and presents those controls in the dashboard.
+- Shared visual changes to the Toolsmith Console dashboard should be made in the toolsmith-console repository and follow its `DESIGN.md`.
 
 ## Review checklist
 

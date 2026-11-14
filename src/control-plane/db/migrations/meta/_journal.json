@@ -5,64 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1791397136432,
-      "tag": "0000_majestic_hiroim",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1791430000000,
-      "tag": "0001_add_tool_call_log_result",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1791536765678,
-      "tag": "0002_workspace_profile_pins_favorites",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1791648000000,
-      "tag": "0003_omp_sessions",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1791882000000,
-      "tag": "0004_tool_permissions",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1791885600000,
-      "tag": "0005_custom_tool_permission_rules",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1791894000000,
-      "tag": "0006_drop_omp_sessions",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1791920000000,
-      "tag": "0007_oauth",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1792512766119,
-      "tag": "0008_simplify_profile",
+      "when": 1794373171527,
+      "tag": "0000_init",
       "breakpoints": true
     }
   ]

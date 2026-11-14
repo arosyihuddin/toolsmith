@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -8,14 +8,11 @@ import { config } from "../../lib/config";
 
 const dataDir = resolve(
   process.env.TOOLSMITH_DATA_DIR ??
-    process.env.OMP_DATA_DIR ??
     (config.nodeEnv === "development"
       ? "./data"
       : config.nodeEnv === "test"
         ? "./.test-data"
-        : existsSync("/var/lib/omp-mcp") && !existsSync("/var/lib/toolsmith")
-          ? "/var/lib/omp-mcp"
-          : "/var/lib/toolsmith"),
+        : "/var/lib/toolsmith"),
 );
 
 mkdirSync(dataDir, { recursive: true });

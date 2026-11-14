@@ -12,7 +12,7 @@ afterEach(async () => {
 describe("filesystem find", () => {
   test("rejects an already-aborted external search without leaving a child process", async () => {
     if (!Bun.which("rg")) return;
-    const root = await mkdtemp(join(tmpdir(), "omp-fs-abort-"));
+    const root = await mkdtemp(join(tmpdir(), "toolsmith-fs-abort-"));
     directories.push(root);
     await writeFile(join(root, "sample.txt"), "search me");
     const controller = new AbortController();
@@ -23,7 +23,7 @@ describe("filesystem find", () => {
 
   test("cancels when the signal fires while path validation is pending", async () => {
     if (!Bun.which("rg")) return;
-    const root = await mkdtemp(join(tmpdir(), "omp-fs-race-"));
+    const root = await mkdtemp(join(tmpdir(), "toolsmith-fs-race-"));
     directories.push(root);
     await writeFile(join(root, "sample.txt"), "search me");
     const controller = new AbortController();
@@ -33,7 +33,7 @@ describe("filesystem find", () => {
   });
 
   test("searches files without requiring fd and respects hidden-file settings", async () => {
-    const root = await mkdtemp(join(tmpdir(), "omp-fs-find-"));
+    const root = await mkdtemp(join(tmpdir(), "toolsmith-fs-find-"));
     directories.push(root);
     await mkdir(join(root, "nested"));
     await writeFile(join(root, "visible.txt"), "visible");
