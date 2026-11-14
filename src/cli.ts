@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { parse, stringify } from "yaml";
 
@@ -228,36 +228,86 @@ async function writeUnit() {
   systemctl("daemon-reload");
   systemctl("enable", SERVICE);
 }
-async function cloneSource(channel: "stable" | "nightly", destination: string) {
+const RELEASE_REPO = "arosyihuddin/toolsmith-mcp";
+const MAIN_COMMIT_API = `https://api.github.com/repos/${RELEASE_REPO}/commits/main`;
+
+async function downloadToFile(url: string, destination: string) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  if (!response.ok) throw new Error(`Download failed (${response.status}): ${url}`);
+  await writeFile(destination, Buffer.from(await response.arrayBuffer()));
+}
+
+async function sha256OfFile(path: string) {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+async function fetchSource(channel: "stable" | "nightly", destination: string) {
   await rm(destination, { recursive: true, force: true });
-  let ref = "main";
-  let version: string | undefined;
-  if (channel === "stable") {
-    print("Checking latest stable GitHub Release...");
-    const response = await fetch(RELEASE_API, {
-      headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) throw new Error(`Unable to fetch latest stable release (GitHub API: ${response.status}).`);
-    const release = await response.json() as { tag_name?: string; draft?: boolean; prerelease?: boolean };
-    if (!release.tag_name || release.draft || release.prerelease || !/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(release.tag_name)) {
-      throw new Error("GitHub returned an invalid or non-stable release tag.");
+  const scratch = destination + ".download";
+  await rm(scratch, { recursive: true, force: true });
+  await mkdir(scratch, { recursive: true });
+  try {
+    if (channel === "stable") {
+      print("Checking latest stable GitHub Release...");
+      const response = await fetch(RELEASE_API, {
+        headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error(`Unable to fetch latest stable release (GitHub API: ${response.status}).`);
+      const release = (await response.json()) as {
+        tag_name?: string;
+        draft?: boolean;
+        prerelease?: boolean;
+        assets?: { name: string; browser_download_url: string }[];
+      };
+      if (!release.tag_name || release.draft || release.prerelease || !/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(release.tag_name)) {
+        throw new Error("GitHub returned an invalid or non-stable release tag.");
+      }
+      const ref = release.tag_name;
+      const version = ref.replace(/^v/, "");
+      const assetName = `toolsmith-${version}.tar.gz`;
+      const asset = release.assets?.find((item) => item.name === assetName);
+      const sums = release.assets?.find((item) => item.name === "SHA256SUMS");
+      if (!asset || !sums) throw new Error(`Release ${ref} is missing its distribution assets (${assetName} / SHA256SUMS).`);
+      print(`Downloading stable release ${ref}...`);
+      const archive = join(scratch, assetName);
+      await downloadToFile(asset.browser_download_url, archive);
+      const sumsPath = join(scratch, "SHA256SUMS");
+      await downloadToFile(sums.browser_download_url, sumsPath);
+      const expected = (await readFile(sumsPath, "utf8"))
+        .split(/\r?\n/)
+        .map((line) => line.trim().split(/\s+/))
+        .find((parts) => parts[1] === assetName || parts[1] === "*" + assetName)?.[0];
+      if (!expected) throw new Error(`SHA256SUMS does not list ${assetName}.`);
+      const actual = await sha256OfFile(archive);
+      if (actual !== expected.toLowerCase()) throw new Error(`Checksum mismatch for ${assetName} (expected ${expected}, got ${actual}).`);
+      print("Checksum verified.");
+      await mkdir(destination, { recursive: true });
+      run("tar", ["-xzf", archive, "-C", destination]);
+      const sourcePackage = JSON.parse(await readFile(join(destination, "package.json"), "utf8")) as { version?: string };
+      if (sourcePackage.version !== version) throw new Error(`Release tag ${ref} does not match package version ${sourcePackage.version ?? "unknown"}.`);
+      const releaseInfo = JSON.parse(await readFile(join(destination, "release.json"), "utf8")) as { commit?: string };
+      if (!releaseInfo.commit) throw new Error(`Release ${ref} is missing its release.json commit metadata.`);
+      return { channel, version, commit: releaseInfo.commit, ref };
     }
-    ref = release.tag_name;
-    version = ref.replace(/^v/, "");
-    print(`Downloading stable release ${ref}...`);
-  } else {
     print("Fetching latest source from branch main (nightly)...");
-  }
-  run("git", ["clone", "--depth", "1", "--branch", ref, REPOSITORY, destination]);
-  if (version) {
+    let commit = "unknown";
+    try {
+      const head = await fetch(MAIN_COMMIT_API, {
+        headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (head.ok) commit = ((await head.json()) as { sha?: string }).sha ?? "unknown";
+    } catch {}
+    const archive = join(scratch, "nightly.tar.gz");
+    await downloadToFile(`https://codeload.github.com/${RELEASE_REPO}/tar.gz/refs/heads/main`, archive);
+    await mkdir(destination, { recursive: true });
+    run("tar", ["-xzf", archive, "-C", destination, "--strip-components=1"]);
     const sourcePackage = JSON.parse(await readFile(join(destination, "package.json"), "utf8")) as { version?: string };
-    if (sourcePackage.version !== version) throw new Error(`Release tag ${ref} does not match package version ${sourcePackage.version ?? "unknown"}.`);
+    return { channel, ...(sourcePackage.version ? { version: sourcePackage.version } : {}), commit, ref: "main" };
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
   }
-  const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: destination, encoding: "utf8" });
-  if (revision.error || revision.status !== 0) throw revision.error ?? new Error("Unable to read source revision.");
-  const commit = revision.stdout.trim();
-  return { channel, ...(version ? { version } : {}), commit, ref };
 }
 
 async function writeInstallMetadata(metadata: { channel: string; version: string; commit: string; ref: string }) {
@@ -287,11 +337,19 @@ async function bootstrap(sourceDir?: string) {
   const temp = join(ROOT, ".source-update");
   let metadata: { channel: string; version: string; commit: string; ref: string };
   if (isToolsmithSource) {
-    const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: source, encoding: "utf8" });
-    metadata = { channel: "local", version: JSON.parse(await readFile(join(source, "package.json"), "utf8")).version, commit: revision.status === 0 ? revision.stdout.trim() : "unknown", ref: "local" };
+    const releaseJsonPath = join(source, "release.json");
+    const releaseInfo = existsSync(releaseJsonPath)
+      ? (JSON.parse(await readFile(releaseJsonPath, "utf8")) as { version?: string; commit?: string; ref?: string })
+      : null;
+    if (releaseInfo?.version && releaseInfo?.commit) {
+      metadata = { channel: "stable", version: releaseInfo.version, commit: releaseInfo.commit, ref: releaseInfo.ref ?? "v" + releaseInfo.version };
+    } else {
+      const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: source, encoding: "utf8" });
+      metadata = { channel: "local", version: JSON.parse(await readFile(join(source, "package.json"), "utf8")).version, commit: revision.status === 0 ? revision.stdout.trim() : "unknown", ref: "local" };
+    }
     await installSource(source);
   } else {
-    const sourceMetadata = await cloneSource("stable", temp);
+    const sourceMetadata = await fetchSource("stable", temp);
     await installSource(temp);
     metadata = { ...sourceMetadata, version: JSON.parse(await readFile(join(APP, "package.json"), "utf8")).version };
     await rm(temp, { recursive: true, force: true });
@@ -339,7 +397,7 @@ async function update(channel: "stable" | "nightly") {
   if (!existsSync(APP))
     throw new Error("Toolsmith is not installed. Run: toolsmith install");
   const temp = join(ROOT, ".source-update");
-  const sourceMetadata = await cloneSource(channel, temp);
+  const sourceMetadata = await fetchSource(channel, temp);
   try {
     await installSource(temp);
     const version = JSON.parse(await readFile(join(APP, "package.json"), "utf8")).version as string;

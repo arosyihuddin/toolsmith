@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPOSITORY="https://github.com/arosyihuddin/toolsmith-mcp.git"
+RELEASE_REPO="arosyihuddin/toolsmith-mcp"
 BRANCH="${TOOLSMITH_BRANCH:-main}"
 TMP_ROOT="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_ROOT"; }
@@ -40,7 +40,8 @@ case "$(uname -m)" in
 esac
 
 command -v curl >/dev/null 2>&1 || fail "curl is required. Install curl and retry."
-command -v git >/dev/null 2>&1 || fail "Git is required. Install git and retry."
+command -v tar >/dev/null 2>&1 || fail "tar is required. Install tar and retry."
+command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail "sha256sum (or shasum) is required to verify release downloads."
 
 if ! command -v bun >/dev/null 2>&1; then
   info "Bun was not found. Installing Bun for the current user..."
@@ -50,18 +51,32 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 command -v bun >/dev/null 2>&1 || fail "Bun installation failed. Install it from https://bun.sh/."
 
-info "Downloading Toolsmith ($BRANCH)..."
-git clone --quiet --depth 1 --branch "$BRANCH" "$REPOSITORY" "$TMP_ROOT/toolsmith"
-
-info "Starting per-user installation..."
+mkdir -p "$TMP_ROOT/toolsmith"
 if [[ "$BRANCH" == "main" ]]; then
-  # The bootstrap CLI itself comes from main, but the installed application
-  # starts from the latest official stable GitHub Release.
-  (cd "$TMP_ROOT" && bun run "$TMP_ROOT/toolsmith/src/cli.ts" install)
+  # Official installs use the latest stable GitHub Release artifact,
+  # verified against its published SHA-256 checksum. No git needed.
+  RELEASE_JSON="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$RELEASE_REPO/releases/latest")"
+  TAG="$(printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//' || true)"
+  [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] || fail "Could not determine the latest stable release tag."
+  VERSION="${TAG#v}"
+  info "Downloading Toolsmith $TAG..."
+  curl -fsSL "https://github.com/$RELEASE_REPO/releases/download/$TAG/toolsmith-$VERSION.tar.gz" -o "$TMP_ROOT/toolsmith-$VERSION.tar.gz"
+  curl -fsSL "https://github.com/$RELEASE_REPO/releases/download/$TAG/SHA256SUMS" -o "$TMP_ROOT/SHA256SUMS"
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$TMP_ROOT" && sha256sum --check SHA256SUMS)
+  else
+    (cd "$TMP_ROOT" && shasum -a 256 --check SHA256SUMS)
+  fi
+  tar -xzf "$TMP_ROOT/toolsmith-$VERSION.tar.gz" -C "$TMP_ROOT/toolsmith"
 else
   # Explicit branch overrides are development installs from that source tree.
-  bun run "$TMP_ROOT/toolsmith/src/cli.ts" install "$TMP_ROOT/toolsmith"
+  info "Downloading Toolsmith ($BRANCH)..."
+  curl -fsSL "https://codeload.github.com/$RELEASE_REPO/tar.gz/refs/heads/$BRANCH" -o "$TMP_ROOT/branch.tar.gz"
+  tar -xzf "$TMP_ROOT/branch.tar.gz" -C "$TMP_ROOT/toolsmith" --strip-components=1
 fi
+
+info "Starting per-user installation..."
+bun run "$TMP_ROOT/toolsmith/src/cli.ts" install "$TMP_ROOT/toolsmith"
 
 info "Installation finished."
 SHELL_NAME="${SHELL##*/}"
