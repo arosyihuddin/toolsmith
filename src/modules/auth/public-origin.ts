@@ -2,6 +2,10 @@
  * Resolve the public HTTPS origin for requests arriving through a local
  * reverse proxy. The HTTP server must remain bound to loopback; these
  * forwarded headers are only trusted at that local proxy boundary.
+ *
+ * One exception: a direct request with no proxy headers at all whose
+ * Host is a loopback name resolves to that plain-http loopback origin
+ * (local development - the traffic never leaves the machine).
  */
 export function resolvePublicOrigin(
   request?: Request,
@@ -43,6 +47,18 @@ export function resolvePublicOrigin(
     } catch {
       // Ignore malformed proxy headers and use the explicit fallback.
     }
+  }
+
+  // Direct loopback access (local development): with no proxy
+  // headers present, a plain-http origin on a loopback host never
+  // leaves this machine and is a valid issuer.
+  if (request && host && !forwardedHost && !forwardedProto && !request.headers.get("cf-visitor")) {
+    try {
+      const directHost = new URL("http://" + host);
+      if (["localhost", "127.0.0.1", "::1", "[::1]"].includes(directHost.hostname) && new URL(request.url).protocol === "http:") {
+        return new URL("http://" + host);
+      }
+    } catch {}
   }
 
   if (!fallback?.trim()) return null;

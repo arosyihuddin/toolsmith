@@ -9,13 +9,35 @@
   let password = $state("");
   let csrfToken = $state("");
   let usernameInput: HTMLInputElement;
+  let sessionState = $state<"checking" | "in" | "out">("checking");
+  let sessionUsername = $state("");
+  let clientName = $state("");
+  let clientId = $state("");
+  let scopeText = $state("mcp:tools");
 
   onMount(() => {
     const query = new URLSearchParams(window.location.search);
     params = [...query.entries()].filter(([key]) => key !== "error");
     csrfToken = document.querySelector('meta[name="toolsmith-oauth-csrf"]')?.getAttribute("content") ?? "";
     if (query.get("error") === "invalid_credentials") error = "Username atau password salah.";
-    usernameInput?.focus();
+    clientName = document.querySelector('meta[name="toolsmith-oauth-client"]')?.getAttribute("content") ?? "";
+    clientId = query.get("client_id") ?? "";
+    scopeText = query.get("scope") ?? "mcp:tools";
+    fetch("/admin/session")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data && data.authenticated) {
+          sessionUsername = data.username ?? "";
+          sessionState = "in";
+        } else {
+          sessionState = "out";
+          usernameInput?.focus();
+        }
+      })
+      .catch(() => {
+        sessionState = "out";
+        usernameInput?.focus();
+      });
   });
 
 </script>
@@ -32,6 +54,20 @@
     <section class="flex min-w-0 items-center justify-center px-5 py-12 sm:px-10 lg:px-12 xl:px-16">
       <div class="w-full max-w-[380px]">
         <div class="mb-8 flex items-center gap-3 lg:hidden"><BrandMark size={34}/><span class="text-sm font-semibold tracking-tight">Toolsmith</span></div>
+{#if sessionState === "checking"}
+        <p class="text-sm text-fg-subtle">Memeriksa sesi…</p>
+      {:else if sessionState === "in"}
+        <div class="mb-8"><p class="mb-3 text-xs font-medium uppercase tracking-[.16em] text-fg-subtle">MCP authorization</p><h2 class="text-2xl font-semibold tracking-tight">Setujui koneksi</h2><p class="mt-2 text-sm leading-6 text-fg-subtle">Anda sudah login sebagai <strong class="text-fg">{sessionUsername}</strong>. Client berikut meminta akses ke instance Toolsmith ini.</p></div>
+        <form method="POST" action="/oauth/authorize" class="space-y-5">
+          {#each params as [key,value]}<input type="hidden" name={key} value={value}/>{/each}
+          <input type="hidden" name="_oauth_csrf" value={csrfToken}/>
+          <div class="rounded-lg border border-line bg-surface-raised px-3.5 py-3 text-sm"><p class="font-medium">{clientName || clientId}</p><p class="mt-1 text-fg-subtle">Scope yang diminta: {scopeText}</p></div>
+          <div class="flex gap-3">
+            <button type="submit" name="decision" value="deny" formnovalidate class="flex-1 rounded-lg border border-line bg-surface px-4 py-3 text-sm font-medium transition hover:bg-surface-hover">Tolak</button>
+            <button type="submit" name="decision" value="approve" formnovalidate class="flex-1 rounded-lg bg-accent px-4 py-3 text-sm font-medium text-accent-fg transition hover:bg-accent-hover">Setujui</button>
+          </div>
+        </form>
+      {:else}
         <div class="mb-8"><p class="mb-3 text-xs font-medium uppercase tracking-[.16em] text-fg-subtle">MCP authorization</p><h2 class="text-2xl font-semibold tracking-tight">Login administrator</h2><p class="mt-2 text-sm leading-6 text-fg-subtle">Masukkan kredensial administrator untuk melanjutkan koneksi.</p></div>
         <form method="POST" action="/oauth/authorize" class="space-y-5">
           {#each params as [key,value]}<input type="hidden" name={key} value={value}/>{/each}
@@ -41,6 +77,7 @@
           {#if error}<p class="rounded-lg border border-danger/20 bg-danger/5 px-3 py-2.5 text-sm text-danger" role="alert">{error}</p>{/if}
           <button type="submit" class="w-full rounded-lg bg-accent px-4 py-3 text-sm font-medium text-accent-fg transition hover:bg-accent-hover">Authorize connection</button>
         </form>
+      {/if}
         <p class="mt-8 border-t border-line pt-5 text-center text-xs text-fg-faint">Secure administrator access</p>
       </div>
     </section>

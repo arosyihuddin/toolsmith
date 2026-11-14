@@ -23,7 +23,8 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 const randomToken = () => randomBytes(32).toString("base64url");
 const securityHeaders = { "x-content-type-options": "nosniff", "x-frame-options": "DENY", "referrer-policy": "no-referrer", "permissions-policy": "camera=(), microphone=(), geolocation=()" };
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(data, { status, headers: { ...securityHeaders, "cache-control": "no-store", pragma: "no-cache", ...headers } });
-function oauthEnabled(request?: Request) { const { issuer, resourceUrl } = oauthConfig(request); return Boolean(issuer && issuer.protocol === "https:" && issuer.pathname === "/" && !issuer.search && !issuer.hash && resourceUrl); }
+function isLoopbackHostname(hostname: string) { return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]"; }
+function oauthEnabled(request?: Request) { const { issuer, resourceUrl } = oauthConfig(request); return Boolean(issuer && (issuer.protocol === "https:" || (issuer.protocol === "http:" && isLoopbackHostname(issuer.hostname))) && issuer.pathname === "/" && !issuer.search && !issuer.hash && resourceUrl); }
 
 sqlite.exec(`CREATE TABLE IF NOT EXISTS toolsmith_admin (id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL UNIQUE, salt TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS toolsmith_admin_login_attempts (subject_hash TEXT PRIMARY KEY, attempts INTEGER NOT NULL, window_started_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS oauth_authorize_csrf (token_hash TEXT PRIMARY KEY, request_hash TEXT NOT NULL, expires_at INTEGER NOT NULL);`);
 const sessionCookie = "toolsmith_session";
@@ -74,11 +75,14 @@ async function writeSecrets(apiToken: string, sudoKey: string, username: string,
 
 const wantsJson = (request: Request) => request.headers.get("accept")?.includes("application/json") ?? false;
 
-async function uiShell(status = 200, oauthCsrfToken?: string): Promise<Response> {
+function escapeHtmlAttribute(value: string) { return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
+
+async function uiShell(status = 200, oauthCsrfToken?: string, oauthClientName?: string): Promise<Response> {
   const file = Bun.file(join(process.cwd(), "dist", "ui", "200.html"));
   if (!(await file.exists())) return new Response("Toolsmith UI is not built. Run the production build first.", { status: 503, headers: { ...securityHeaders, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   let html = await file.text();
   if (oauthCsrfToken) html = html.replace("</head>", `<meta name="toolsmith-oauth-csrf" content="${oauthCsrfToken}"></head>`);
+  if (oauthClientName) html = html.replace("</head>", `<meta name="toolsmith-oauth-client" content="${escapeHtmlAttribute(oauthClientName)}"></head>`);
   const headers: Record<string, string> = { ...securityHeaders, "content-type": "text/html; charset=utf-8", "cache-control": "no-store" };
   return new Response(html, { status, headers });
 }
@@ -320,7 +324,7 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
     const csrfTokenHash = hash(oauthCsrfToken);
     sqlite.query("INSERT INTO oauth_authorize_csrf (token_hash, request_hash, expires_at) VALUES (?, ?, ?)").run(csrfTokenHash, oauthAuthorizeRequestHash(authorizeParams), now() + oauthAuthorizeCsrfLifetime);
     logger.info({ event: "oauth_authorize_csrf_issued", pid: process.pid, tokenFingerprint: csrfTokenHash.slice(0, 12), stored: Boolean(sqlite.query("SELECT token_hash FROM oauth_authorize_csrf WHERE token_hash = ?").get(csrfTokenHash)) }, "OAuth authorization CSRF token issued");
-    return uiShell(200, oauthCsrfToken);
+    return uiShell(200, oauthCsrfToken, row.client_name ?? "");
   }
 
   if (path === "/oauth/authorize" && request.method === "POST") {
@@ -367,28 +371,50 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
       logger.warn({ event: "oauth_authorize_rejected", csrfTokenPresent: Boolean(csrfFormToken), csrfRecordFound: Boolean(csrfRecord), csrfRequestHashMatches, csrfTokenValid, origin, refererOrigin, requestUrlOrigin, resolvedOrigin: requestOrigin(request) }, "OAuth authorization rejected by origin/CSRF protection");
       return json({ error: "Cross-origin request rejected" }, 403);
     }
-    const submittedUsername = form.get("username") ?? "";
-    if (isLoginBlocked(request, submittedUsername)) return json({ error: "Too many login attempts. Try again in 15 minutes." }, 429, { "retry-after": String(LOGIN_WINDOW_SECONDS) });
     const clientId = form.get("client_id") ?? "", row = client(clientId);
     const redirect = form.get("redirect_uri") ?? "", challenge = form.get("code_challenge") ?? "";
     const params = new URLSearchParams();
     for (const [key, value] of form.entries()) if (key !== "username" && key !== "password") params.append(key, value);
     if (!row || !JSON.parse(row.redirect_uris).includes(redirect) || form.get("response_type") !== "code" || form.get("code_challenge_method") !== "S256" || !challenge) return json({ error: "invalid_request" }, 400);
-    if (!verifyAdmin(form.get("username") ?? "", form.get("password") ?? "")) {
-      recordLoginFailure(request, form.get("username") ?? "");
-      const failedUrl = new URL(request.url);
-      for (const [key, value] of params) failedUrl.searchParams.set(key, value);
-      failedUrl.searchParams.set("error", "invalid_credentials");
-      return Response.redirect(failedUrl.href, 303);
-    }
-    sqlite.query("DELETE FROM oauth_authorize_csrf WHERE token_hash = ?").run(csrfTokenHash);
-    clearLoginFailures(request, form.get("username") ?? "");
     const resource = form.get("resource") || resourceUrl!.href;
     if (resource !== resourceUrl!.href) return json({ error: "invalid_target" }, 400);
+    // Two ways to authorize: an explicit consent decision backed
+    // by an existing administrator session, or administrator
+    // credentials - which also establish that session, so the
+    // next authorization only needs the consent decision.
+    const decision = form.get("decision");
+    let sessionCookieHeader: string | null = null;
+    if (decision !== null) {
+      if (!hasSession(request)) return json({ error: "invalid_request", error_description: "An active administrator session is required to approve or deny." }, 400);
+      sqlite.query("DELETE FROM oauth_authorize_csrf WHERE token_hash = ?").run(csrfTokenHash);
+      if (decision === "deny") {
+        const target = new URL(redirect);
+        target.searchParams.set("error", "access_denied");
+        const deniedState = form.get("state"); if (deniedState !== null) target.searchParams.set("state", deniedState);
+        return Response.redirect(target.href, 302);
+      }
+      if (decision !== "approve") return json({ error: "invalid_request" }, 400);
+    } else {
+      const submittedUsername = form.get("username") ?? "";
+      if (isLoginBlocked(request, submittedUsername)) return json({ error: "Too many login attempts. Try again in 15 minutes." }, 429, { "retry-after": String(LOGIN_WINDOW_SECONDS) });
+      if (!verifyAdmin(form.get("username") ?? "", form.get("password") ?? "")) {
+        recordLoginFailure(request, form.get("username") ?? "");
+        const failedUrl = new URL(request.url);
+        for (const [key, value] of params) failedUrl.searchParams.set(key, value);
+        failedUrl.searchParams.set("error", "invalid_credentials");
+        return Response.redirect(failedUrl.href, 303);
+      }
+      sqlite.query("DELETE FROM oauth_authorize_csrf WHERE token_hash = ?").run(csrfTokenHash);
+      clearLoginFailures(request, form.get("username") ?? "");
+      const sessionTokenValue = randomToken();
+      sqlite.query("INSERT INTO toolsmith_admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(hash(sessionTokenValue), now() + 604800);
+      sessionCookieHeader = cookie(sessionTokenValue, 604800, request);
+    }
     const code = randomToken();
     sqlite.query("INSERT INTO oauth_codes (code_hash, client_id, redirect_uri, code_challenge, state, scopes, resource, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(hash(code), clientId, redirect, challenge, form.get("state"), JSON.stringify((form.get("scope") ?? "mcp:tools").split(/\s+/).filter((s) => scopes.includes(s))), resource, now() + 300);
     const target = new URL(redirect); target.searchParams.set("code", code);
     const state = form.get("state"); if (state !== null) target.searchParams.set("state", state);
+    if (sessionCookieHeader) return new Response(null, { status: 302, headers: { location: target.href, "set-cookie": sessionCookieHeader, "cache-control": "no-store" } });
     return Response.redirect(target.href, 302);
   }
 
