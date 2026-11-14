@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPOSITORY="https://github.com/arosyihuddin/toolsmith.git"
+REPOSITORY="https://github.com/arosyihuddin/toolsmith-mcp.git"
 BRANCH="${TOOLSMITH_BRANCH:-main}"
 TMP_ROOT="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_ROOT"; }

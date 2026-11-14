@@ -19,7 +19,7 @@ Requirements: Linux with systemd, curl, and Git. Bun is installed automatically 
 
 One-line installation:
 
-    curl -fsSL https://raw.githubusercontent.com/arosyihuddin/toolsmith/main/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/arosyihuddin/toolsmith-mcp/main/install.sh | bash
 
 Or, from a clone of this repository:
 
